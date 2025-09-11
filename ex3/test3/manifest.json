@@ -1,0 +1,22 @@
+{
+  "main": "ex3",
+  "feature": "test3",
+  "version": "0.1.13",
+  "devmode": false,
+  "noscan": false,
+  "platform": "x86",
+  "targets": [
+    "dockerhub",
+    "quay.io",
+    "setonix-registry"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-ex3/test3",
+    "path": "ex3/test3/"
+  },
+  "metadata": {
+    "timestamp": "2025-09-11T23:11:44.690859Z",
+    "correlation_id": "60f3abf1-ce4a-499e-8436-5679053e4915"
+  }
+}
