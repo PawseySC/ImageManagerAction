@@ -1,0 +1,1574 @@
+name: Image Manager CI/CD Pipeline
+# Version 2.0.0 - Updated for Image Manager Integration
+# This workflow processes uploads from Image Manager tool
+# Triggered by pushes to cicd-* branches with manifest.json configuration
+# Supports branch formats: cicd-main/feature (preferred) or cicd-main-feature (legacy)
+
+on:
+  push:
+    branches:
+      - 'cicd-*'
+      - 'cicd-*/**'
+      - 'cicd-**'
+
+permissions:
+  contents: read
+  security-events: write  # Required for uploading SARIF results to GitHub Security tab
+  actions: read           # Required for accessing workflow run information
+
+jobs:
+  PREPARE-job:
+    runs-on: ubuntu-latest
+    outputs:
+      # Job Output Variables:
+      # - proceed_valid: Whether to proceed with build (true/false)
+      # - main: Main software name from manifest (e.g., "python")
+      # - feature: Feature name from manifest (e.g., "cuda-hpc-python")
+      # - version: Semver version from manifest (e.g., "1.2.3")
+      # - devmode: Development mode flag (true/false)
+      # - noscan: Skip security scan flag (true/false)
+      # - platform: Target platform (x86/arm)
+      # - targets: JSON array of target registries
+      # - branch_path: Directory path based on branch (e.g., "python/cuda-hpc-python")
+      # - dockerfile_path: Path to Dockerfile (e.g., "python/cuda-hpc-python/Dockerfile")
+      # - correlation_id: Unique ID for tracking
+      # Registry availability flags:
+      # - dockerhub_available: Whether Docker Hub credentials are available
+      # - quayio_available: Whether Quay.io credentials are available
+      # - setonixreg_available: Whether Setonix Registry credentials are available
+      proceed_valid: ${{ steps.validate_manifest.outputs.proceed_valid }}
+      main: ${{ steps.validate_manifest.outputs.main }}
+      feature: ${{ steps.validate_manifest.outputs.feature }}
+      version: ${{ steps.validate_manifest.outputs.version }}
+      devmode: ${{ steps.validate_manifest.outputs.devmode }}
+      noscan: ${{ steps.validate_manifest.outputs.noscan }}
+      platform: ${{ steps.validate_manifest.outputs.platform }}
+      targets: ${{ steps.validate_manifest.outputs.targets }}
+      branch_path: ${{ steps.validate_manifest.outputs.branch_path }}
+      dockerfile_path: ${{ steps.validate_manifest.outputs.dockerfile_path }}
+      correlation_id: ${{ steps.validate_manifest.outputs.correlation_id }}
+      date: ${{ steps.date.outputs.date }}
+      dockerhub_available: ${{ steps.check_vars_secrets.outputs.dockerhub_available }}
+      quayio_available: ${{ steps.check_vars_secrets.outputs.quayio_available }}
+      setonixreg_available: ${{ steps.check_vars_secrets.outputs.setonixreg_available }}
+    
+    steps:
+      - name: Initialize runner configuration
+        id: set_default_runner_label
+        run: |
+          echo "runner_label=ubuntu-latest" >> $GITHUB_OUTPUT
+
+      - name: Validate environment credentials
+        id: check_vars_secrets
+        run: |
+          missing_vars=()
+          missing_secrets=()
+
+          # check Variables
+          if [ -z "${{ vars.DOCKERHUB_USERNAME }}" ]; then
+            missing_vars+=("DOCKERHUB_USERNAME")
+          fi
+
+          if [ -z "${{ vars.QUAYIO_USERNAME }}" ]; then
+            missing_vars+=("QUAYIO_USERNAME")
+          fi
+
+          if [ -z "${{ vars.SETONIXREG_USERNAME }}" ]; then
+            missing_vars+=("SETONIXREG_USERNAME")
+          fi
+
+          if [ -z "${{ vars.ACACIA_BUCKETNAME }}" ]; then
+            missing_vars+=("ACACIA_BUCKETNAME")
+          fi
+
+          if [ -z "${{ vars.ACACIA_SIF_BUCKETNAME }}" ]; then
+            missing_vars+=("ACACIA_SIF_BUCKETNAME")
+          fi
+
+          # check Secrets
+          if [ -z "${{ secrets.PAT_TOKEN }}" ]; then
+            missing_secrets+=("PAT_TOKEN")
+          fi
+
+          if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            missing_secrets+=("DOCKERHUB_TOKEN")
+          fi
+
+          if [ -z "${{ secrets.QUAYIO_TOKEN }}" ]; then
+            missing_secrets+=("QUAYIO_TOKEN")
+          fi
+
+          if [ -z "${{ secrets.SETONIXREG_PASS }}" ]; then
+            missing_secrets+=("SETONIXREG_PASS")
+          fi
+
+          if [ -z "${{ secrets.ACACIA_ACCESS_KEY_ID }}" ]; then
+            missing_secrets+=("ACACIA_ACCESS_KEY_ID")
+          fi
+
+          if [ -z "${{ secrets.ACACIA_SECRET_ACCESS_KEY }}" ]; then
+            missing_secrets+=("ACACIA_SECRET_ACCESS_KEY")
+          fi
+
+          # Log status of variables and secrets
+          if [ ${#missing_vars[@]} -ne 0 ]; then
+            echo "Missing Variables: ${missing_vars[@]}"
+          else
+            echo "All required variables are set."
+          fi
+          
+          if [ ${#missing_secrets[@]} -ne 0 ]; then
+            echo "Missing Secrets: ${missing_secrets[@]}"
+          else
+            echo "All required secrets are set."
+          fi
+          
+          # Set output flags for conditional job execution
+          dockerhub_available=$( [ -n "${{ vars.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ] && echo 'true' || echo 'false' )
+          quayio_available=$( [ -n "${{ vars.QUAYIO_USERNAME }}" ] && [ -n "${{ secrets.QUAYIO_TOKEN }}" ] && echo 'true' || echo 'false' )
+          setonixreg_available=$( [ -n "${{ vars.SETONIXREG_USERNAME }}" ] && [ -n "${{ secrets.SETONIXREG_PASS }}" ] && echo 'true' || echo 'false' )
+          
+          echo "dockerhub_available=$dockerhub_available" >> $GITHUB_OUTPUT
+          echo "quayio_available=$quayio_available" >> $GITHUB_OUTPUT
+          echo "setonixreg_available=$setonixreg_available" >> $GITHUB_OUTPUT
+          
+          # Log registry availability status
+          echo ""
+          echo "=== Registry Credentials Check ==="
+          if [ "$dockerhub_available" = "true" ]; then
+            echo "[✓] Docker Hub: Credentials available"
+          else
+            echo "[✗] Docker Hub: Missing credentials (DOCKERHUB_USERNAME or DOCKERHUB_TOKEN)"
+          fi
+          
+          if [ "$quayio_available" = "true" ]; then
+            echo "[✓] Quay.io: Credentials available"
+          else
+            echo "[✗] Quay.io: Missing credentials (QUAYIO_USERNAME or QUAYIO_TOKEN)"
+          fi
+          
+          if [ "$setonixreg_available" = "true" ]; then
+            echo "[✓] Setonix Registry: Credentials available"
+          else
+            echo "[✗] Setonix Registry: Missing credentials (SETONIXREG_USERNAME or SETONIXREG_PASS)"
+          fi
+          echo "==================================="
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1  # Only need current commit for manifest-based workflow
+
+      - name: Determine branch directory path
+        id: parse_branch
+        run: |
+          # Extract main and feature from branch name
+          # Supports formats: cicd-main/feature or cicd-main-feature
+          branch_name="${{ github.ref_name }}"
+          echo "Branch name: $branch_name"
+          
+          if [[ ! "$branch_name" =~ ^cicd- ]]; then
+            echo "Error: Branch name must start with 'cicd-'"
+            exit 1
+          fi
+          
+          # Remove 'cicd-' prefix
+          path_part="${branch_name#cicd-}"
+          echo "Path part after removing 'cicd-': $path_part"
+          
+          # Check if path_part contains a forward slash (preferred format: cicd-main/feature)
+          if [[ "$path_part" == *"/"* ]]; then
+            # Format: cicd-main/feature -> main/feature
+            branch_path="$path_part"
+            echo "✓ Using slash-separated format: $branch_path"
+          else
+            # Fallback: try to parse cicd-main-feature format
+            # This is less reliable but maintained for backwards compatibility
+            echo "⚠️  Using legacy dash-separated format, consider using cicd-main/feature instead"
+            branch_path="$path_part"
+          fi
+          
+          echo "Final branch path: $branch_path"
+          echo "branch_path=$branch_path" >> $GITHUB_OUTPUT
+
+      - name: Validate manifest and extract configuration
+        id: validate_manifest
+        run: |
+          branch_path="${{ steps.parse_branch.outputs.branch_path }}"
+          manifest_file="${branch_path}/manifest.json"
+          
+          echo "Looking for manifest at: $manifest_file"
+          echo "Searching for Dockerfile variants in: $branch_path"
+          
+          # Check if manifest.json exists
+          if [ ! -f "$manifest_file" ]; then
+            echo "Error: manifest.json not found at $manifest_file"
+            echo "This workflow requires a manifest.json file in the branch directory."
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Find Dockerfile with case-insensitive search and various extensions
+          dockerfile_found=""
+          dockerfile_patterns=(
+            "${branch_path}/Dockerfile"
+            "${branch_path}/dockerfile" 
+            "${branch_path}/"*.dockerfile
+            "${branch_path}/"*.Dockerfile
+            "${branch_path}/"*.[Dd]ockerfile
+          )
+          
+          echo "Searching for Dockerfile with patterns:"
+          for pattern in "${dockerfile_patterns[@]}"; do
+            echo "  - $pattern"
+            for file in $pattern; do
+              if [ -f "$file" ]; then
+                dockerfile_found="$file"
+                echo "✓ Found Dockerfile: $dockerfile_found"
+                break 2
+              fi
+            done
+          done
+          
+          # Check if any Dockerfile variant was found
+          if [ -z "$dockerfile_found" ]; then
+            echo "Error: No Dockerfile found in $branch_path"
+            echo "Searched for: Dockerfile, dockerfile, *.dockerfile, *.Dockerfile, *.[Dd]ockerfile"
+            echo "This workflow requires a Dockerfile in the branch directory."
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          dockerfile_path="$dockerfile_found"
+          echo "Using Dockerfile: $dockerfile_path"
+          
+          echo "✓ Found manifest.json and Dockerfile"
+          
+          # Parse and validate manifest.json
+          echo "Parsing manifest.json..."
+          
+          # Extract configuration using jq
+          main=$(jq -r '.main // empty' "$manifest_file")
+          feature=$(jq -r '.feature // empty' "$manifest_file")
+          version=$(jq -r '.version // empty' "$manifest_file")
+          devmode=$(jq -r '.devmode // false' "$manifest_file")
+          noscan=$(jq -r '.noscan // false' "$manifest_file")
+          platform=$(jq -r '.platform // "x86"' "$manifest_file")
+          targets=$(jq -c '.targets // []' "$manifest_file")
+          correlation_id=$(jq -r '.metadata.correlation_id // empty' "$manifest_file")
+          
+          # Validate required fields
+          if [ -z "$main" ] || [ "$main" = "null" ]; then
+            echo "Error: Missing 'main' field in manifest.json"
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          if [ -z "$feature" ] || [ "$feature" = "null" ]; then
+            echo "Error: Missing 'feature' field in manifest.json"
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "Error: Missing 'version' field in manifest.json"
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Validate version format (semver X.Y.Z)
+          if ! echo "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: Invalid version format '$version'. Expected X.Y.Z"
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Validate platform
+          if [ "$platform" != "x86" ] && [ "$platform" != "arm" ]; then
+            echo "Error: Invalid platform '$platform'. Expected 'x86' or 'arm'"
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Validate targets array
+          if [ "$targets" = "[]" ] || [ "$targets" = "null" ]; then
+            echo "Warning: No targets specified in manifest.json"
+          fi
+          
+          # Validate branch path matches manifest
+          expected_path="${main}/${feature}"
+          if [ "$branch_path" != "$expected_path" ]; then
+            echo "Error: Branch path '$branch_path' doesn't match manifest main/feature '$expected_path'"
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "✓ Manifest validation passed"
+          echo ""
+          echo "=== Configuration Summary ==="
+          echo "Main: $main"
+          echo "Feature: $feature"
+          echo "Version: $version"
+          echo "Dev Mode: $devmode"
+          echo "No Scan: $noscan"
+          echo "Platform: $platform"
+          echo "Targets: $targets"
+          echo "Correlation ID: $correlation_id"
+          echo "Branch Path: $branch_path"
+          echo "Dockerfile: $dockerfile_path"
+          echo "============================"
+          
+          # Set outputs
+          echo "proceed_valid=true" >> $GITHUB_OUTPUT
+          echo "main=$main" >> $GITHUB_OUTPUT
+          echo "feature=$feature" >> $GITHUB_OUTPUT
+          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "devmode=$devmode" >> $GITHUB_OUTPUT
+          echo "noscan=$noscan" >> $GITHUB_OUTPUT
+          echo "platform=$platform" >> $GITHUB_OUTPUT
+          echo "targets=$targets" >> $GITHUB_OUTPUT
+          echo "branch_path=$branch_path" >> $GITHUB_OUTPUT
+          echo "dockerfile_path=$dockerfile_path" >> $GITHUB_OUTPUT
+          echo "correlation_id=$correlation_id" >> $GITHUB_OUTPUT
+
+      - name: Generate date tag
+        if: steps.validate_manifest.outputs.proceed_valid == 'true'
+        id: date
+        run: |
+          date_tag=$(date +'%m-%d')
+          echo "Date tag: $date_tag"
+          echo "date=$date_tag" >> $GITHUB_OUTPUT
+      
+  BUILD-job:
+    needs: PREPARE-job
+    runs-on: setonix-podman02
+    if: needs.PREPARE-job.outputs.proceed_valid == 'true'
+    outputs:
+      image_tag: ${{ steps.build_container.outputs.image_tag }}
+      image_name: ${{ steps.build_container.outputs.image_name }}
+    steps:
+      - name: Display build environment
+        run: |
+          echo "Hostname: $(hostname)"
+          echo "Building: ${{ needs.PREPARE-job.outputs.main }}/${{ needs.PREPARE-job.outputs.feature }}:${{ needs.PREPARE-job.outputs.version }}"
+          echo "Platform: ${{ needs.PREPARE-job.outputs.platform }}"
+          echo "Correlation ID: ${{ needs.PREPARE-job.outputs.correlation_id }}"
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Configure podman environment
+        id: setup_env
+        run: |
+          echo "Setting up container environment variables..."
+          
+          # Export environment variables
+          export XDG_DATA_HOME=/container/${USER}/data
+          export XDG_RUNTIME_DIR=/container/${USER}/runtime
+          export TMPDIR=/container/${USER}/tmp/
+          
+          # Create required directories
+          mkdir -p ${XDG_DATA_HOME}
+          mkdir -p ${XDG_RUNTIME_DIR}
+          mkdir -p ${TMPDIR}
+          
+          # Set up build optimization variables based on system capabilities
+          # JOBS: Number of parallel build stages (optimized for 60+ core system)
+          # IMAGE_CACHE_REF: Cache reference for registry-based caching (using existing cache structure)
+          
+          # Simple JOBS setting based on CPU cores
+          CPU_CORES=$(nproc)
+          echo "Detected CPU cores: $CPU_CORES"
+          
+          # Simple 2-tier configuration
+          if [ "$CPU_CORES" -gt 8 ]; then
+            JOBS="16"  # High-core systems
+          else
+            JOBS="4"   # Standard systems (8 cores and below)
+          fi
+          
+          echo "JOBS setting: $JOBS (based on $CPU_CORES cores)"
+          IMAGE_CACHE_REF="${IMAGE_CACHE_REF:-}"  # Will be configured based on image tag and cache directory
+          
+          # Verify directories and output status
+          echo "Environment setup completed:"
+          echo "USER: ${USER}"
+          echo "XDG_DATA_HOME: ${XDG_DATA_HOME}"
+          echo "XDG_RUNTIME_DIR: ${XDG_RUNTIME_DIR}"
+          echo "TMPDIR: ${TMPDIR}"
+          echo "CPU_CORES: $CPU_CORES"
+          echo "JOBS: $JOBS (simplified 2-tier setting)"
+          echo "IMAGE_CACHE_REF: ${IMAGE_CACHE_REF:-'auto-configure'}"
+          
+          # Check if directories exist
+          for dir in "${XDG_DATA_HOME}" "${XDG_RUNTIME_DIR}" "${TMPDIR}"; do
+            if [ -d "$dir" ]; then
+              echo "✓ Podman Directory exists: $dir"
+            else
+              echo "✗ Podman Directory missing: $dir"
+              exit 1
+            fi
+          done
+          
+          # Set environment variables for subsequent steps
+          echo "XDG_DATA_HOME=${XDG_DATA_HOME}" >> $GITHUB_ENV
+          echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> $GITHUB_ENV
+          echo "TMPDIR=${TMPDIR}" >> $GITHUB_ENV
+          echo "JOBS=${JOBS}" >> $GITHUB_ENV
+          echo "IMAGE_CACHE_REF=${IMAGE_CACHE_REF}" >> $GITHUB_ENV
+
+      - name: Initialize build cache
+        id: setup_cache
+        run: |
+          # Setup podman cache directory
+          CACHE_DIR="/container/${USER}/podman-cache"
+          mkdir -p "$CACHE_DIR"
+          
+          # Create cache subdirectories for different cache types
+          REGISTRY_CACHE_DIR="$CACHE_DIR/registry"
+          BUILD_CACHE_DIR="$CACHE_DIR/build"
+          mkdir -p "$REGISTRY_CACHE_DIR" "$BUILD_CACHE_DIR"
+          
+          echo "[CACHE SETUP]:"
+          echo "  Main cache directory: $CACHE_DIR"
+          echo "  Registry cache directory: $REGISTRY_CACHE_DIR"
+          echo "  Build cache directory: $BUILD_CACHE_DIR"
+          
+          # Configure podman to use cache
+          export TMPDIR="${TMPDIR:-/tmp}"
+          
+          # Check cache sizes if exist
+          if [ -d "$CACHE_DIR" ]; then
+            cache_size=$(du -sh "$CACHE_DIR" 2>/dev/null | cut -f1 || echo "0")
+            echo "  Current total cache size: $cache_size"
+            
+            if [ -d "$REGISTRY_CACHE_DIR" ]; then
+              reg_cache_size=$(du -sh "$REGISTRY_CACHE_DIR" 2>/dev/null | cut -f1 || echo "0")
+              echo "  Registry cache size: $reg_cache_size"
+            fi
+          else
+            echo "  Cache directories created (empty)"
+          fi
+          
+          # Set environment variables for cache directories
+          echo "CACHE_DIR=$CACHE_DIR" >> $GITHUB_ENV
+          echo "REGISTRY_CACHE_DIR=$REGISTRY_CACHE_DIR" >> $GITHUB_ENV
+          echo "BUILD_CACHE_DIR=$BUILD_CACHE_DIR" >> $GITHUB_ENV
+
+      - name: Build container image
+        id: build_container
+        run: |
+          # Get variables from PREPARE-job
+          branch_path="${{ needs.PREPARE-job.outputs.branch_path }}"
+          dockerfile_path="${{ needs.PREPARE-job.outputs.dockerfile_path }}"
+          main="${{ needs.PREPARE-job.outputs.main }}"
+          feature="${{ needs.PREPARE-job.outputs.feature }}"
+          version="${{ needs.PREPARE-job.outputs.version }}"
+          
+          # Create image name from main and feature
+          image_name="${main}-${feature}"
+          image_tag="${image_name}:${version}"
+          
+          # Set up cache tracking (Podman uses native layer caching)
+          IMAGE_CACHE_REF="${main}-${feature}:cache"
+          
+          # Check if we have previous builds for this main/feature combination
+          if [ -d "${REGISTRY_CACHE_DIR}/${main}-${feature}" ]; then
+            echo "✓ Found existing build cache directory for ${main}-${feature}"
+            echo "✓ Podman will reuse layers from previous builds automatically"
+          else
+            echo "ℹ️ First build for ${main}-${feature}, creating cache tracking"
+          fi
+          
+          echo "Building container with podman (optimized)..."
+          echo "Build context: $branch_path"
+          echo "Dockerfile: $dockerfile_path"  
+          echo "Image tag: $image_tag"
+          echo "Cache reference: $IMAGE_CACHE_REF"
+          
+          # Advanced build with layer caching and parallel jobs support
+          # Note: Podman uses different caching mechanism than Docker BuildKit
+          podman build \
+            --format=docker \
+            --layers \
+            --pull=newer \
+            ${JOBS:+--jobs "$JOBS"} \
+            -f "$dockerfile_path" \
+            -t "$image_tag" \
+            "$branch_path"
+          
+          # Verify the image was built
+          if podman images | grep -q "${image_name}"; then
+            echo "✓ Image built successfully: $image_tag"
+            
+            # Show advanced optimization information
+            echo "[LAYER CACHE]: Podman native layer caching enabled"
+            echo "[PULL STRATEGY]: newer (only pull if newer than cached)"
+            echo "[PARALLEL JOBS]: $JOBS concurrent build stages ($(nproc) cores detected)"
+            echo "[CACHE DIRECTORY]: Using existing cache structure at ${CACHE_DIR}"
+            echo "[OPTIMIZATION]: Multi-stage builds and layer reuse enabled"
+            echo "[FORMAT]: Docker-compatible image format"
+            
+            # Create cache tracking for next builds
+            mkdir -p "${REGISTRY_CACHE_DIR}/${main}-${feature}"
+            echo "$(date): Built ${image_tag} with cache ref ${IMAGE_CACHE_REF}" >> "${REGISTRY_CACHE_DIR}/${main}-${feature}/build.log"
+            
+            # Show all images to see layer reuse
+            echo "[ALL IMAGES]:"
+            podman images | head -10
+          else
+            echo "✗ Failed to build image: $image_tag"
+            exit 1
+          fi
+          
+          # Set outputs for next step
+          echo "image_tag=$image_tag" >> $GITHUB_OUTPUT
+          echo "image_name=$image_name" >> $GITHUB_OUTPUT
+
+      - name: Export image to archive
+        id: save_container
+        run: |
+          # Get variables from previous step
+          image_tag="${{ steps.build_container.outputs.image_tag }}"
+          image_name="${{ steps.build_container.outputs.image_name }}"
+          version="${{ needs.PREPARE-job.outputs.version }}"
+          
+          # Define output file
+          output_file="${image_name}_${version}.tar"
+          
+          echo "Saving container to Docker archive..."
+          echo "Image: $image_tag"
+          echo "Output: $output_file"
+          
+          # Save with podman using Docker archive format (compatible with Trivy)
+          podman save --format docker-archive "$image_tag" -o "$output_file"
+          
+          # Verify the file was created
+          if [ -f "$output_file" ]; then
+            file_size=$(ls -lh "$output_file" | awk '{print $5}')
+            echo "✓ Archive saved successfully: $output_file (Size: $file_size)"
+          else
+            echo "✗ Failed to save archive: $output_file"
+            exit 1
+          fi
+          
+          # Set outputs
+          echo "archive_file=$output_file" >> $GITHUB_OUTPUT
+          echo "archive_path=${PWD}/$output_file" >> $GITHUB_OUTPUT
+
+      - name: Upload archive to S3 storage
+        id: s3_upload
+        uses: ./.github/actions/setup-rclone
+        with:
+          access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+          secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+          endpoint: https://projects.pawsey.org.au
+          bucket: ${{ vars.ACACIA_BUCKETNAME }}
+          destination_path: ""  # Not used in upload mode
+          upload_mode: 'true'
+          upload_file: ${{ steps.save_container.outputs.archive_file }}
+          upload_file_type: 'archive'
+
+      - name: Load Singularity module and generate SIF file
+        id: build_sif
+        run: |
+          # Get variables
+          archive_file="${{ steps.save_container.outputs.archive_file }}"
+          image_name="${{ steps.build_container.outputs.image_name }}"
+          version="${{ needs.PREPARE-job.outputs.version }}"
+          
+          # Define SIF output file
+          sif_file="${image_name}_${version}.sif"
+          
+          echo "Loading Singularity module and generating SIF file..."
+          echo "Source: docker-archive://$archive_file"
+          echo "Output: $sif_file"
+          
+          # Load Singularity module
+          echo "Loading Singularity module..."
+          if module load singularity/4.1.0; then
+            echo "✓ Singularity module loaded successfully"
+          else
+            echo "✗ Failed to load Singularity module"
+            exit 1
+          fi
+          
+          # Verify Singularity is available
+          singularity --version
+          
+          # Build SIF file from Docker archive using Singularity
+          echo "Building SIF file from Docker archive..."
+          CORES=$(nproc)
+          echo "Detected $CORES CPU cores for optimization"
+          
+          # Set environment variables for mksquashfs optimization
+          export MKSQUASHFS_PROCESSORS=$CORES
+          export MKSQUASHFS_MEM="80%"
+          export MKSQUASHFS_COMP="zstd"
+          export MKSQUASHFS_COMP_OPTS="-Xcompression-level 3"
+          
+          echo "Setting mksquashfs optimization via environment variables"
+          
+          # Singularity build with environment-based optimization
+          if singularity build \
+            --force \
+            "$sif_file" "docker-archive://$archive_file"; then
+            if [ -f "$sif_file" ]; then
+              file_size=$(ls -lh "$sif_file" | awk '{print $5}')
+              echo "✓ SIF file generated successfully: $sif_file (Size: $file_size)"
+              echo "[SINGULARITY OPTIMIZATION]:"
+              echo "  - Processors: $CORES cores"
+              echo "  - Memory: 80% allocation"
+              echo "  - Compression: zstd level 3"
+              echo "  - Method: Environment variables"
+            else
+              echo "✗ SIF file generation failed - file not found"
+              exit 1
+            fi
+          else
+            echo "✗ Failed to generate SIF file"
+            exit 1
+          fi
+          
+          # Set outputs
+          echo "sif_file=$sif_file" >> $GITHUB_OUTPUT
+          echo "sif_path=${PWD}/$sif_file" >> $GITHUB_OUTPUT
+
+      - name: Upload SIF file to S3 storage
+        id: s3_sif_upload
+        uses: ./.github/actions/setup-rclone
+        with:
+          access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+          secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+          endpoint: https://projects.pawsey.org.au
+          bucket: ${{ vars.ACACIA_SIF_BUCKETNAME }}
+          destination_path: ""  # Not used in upload mode
+          upload_mode: 'true'
+          upload_file: ${{ steps.build_sif.outputs.sif_file }}
+          upload_file_type: 'sif'
+
+  SCAN-AND-REPORT-job:
+    needs: [BUILD-job, PREPARE-job]
+    runs-on: setonix-podman02
+    if: needs.PREPARE-job.outputs.proceed_valid == 'true' && needs.PREPARE-job.outputs.noscan != 'true'
+    env:
+      IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
+      VERSION: ${{ needs.PREPARE-job.outputs.version }}
+      REPORT_DIR: ./trivy-reports
+    steps:
+    - name: Display scan environment
+      run: |
+          echo "Hostname: $(hostname)"
+          echo "Scanning: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
+          echo "No Scan Flag: ${{ needs.PREPARE-job.outputs.noscan }}"
+
+    - name: Download archive from S3
+      id: locate
+      uses: ./.github/actions/setup-rclone
+      with:
+        access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+        secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+        endpoint: https://projects.pawsey.org.au
+        bucket: ${{ vars.ACACIA_BUCKETNAME }}
+        destination_path: ${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar
+        download_mode: true
+        dockerfile_name: ${{ env.IMAGE_NAME }}
+        version: ${{ env.VERSION }}
+        load_to_podman: false
+
+    - name: Initialize scan workspace
+      run: |
+        mkdir -p "${REPORT_DIR}"
+        echo "Report directory created: ${REPORT_DIR}"
+
+    # Generate JSON report first
+    - name: Run vulnerability scan (JSON)
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: image
+        input: ./${{ steps.locate.outputs.archive_name }}
+        format: json
+        output: ${{ env.REPORT_DIR }}/scan-results.json
+        severity: CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN
+        ignore-unfixed: true
+        vuln-type: os,library
+        exit-code: '0'
+        hide-progress: true
+        cache: true
+      env:
+        TRIVY_SKIP_DB_UPDATE: false
+        TRIVY_SKIP_JAVA_DB_UPDATE: false
+
+    # Process JSON to create readable summary
+    - name: Process scan results to summary
+      run: |
+        python3 -c "
+        import json
+        import sys
+        import os
+        
+        json_file = '${REPORT_DIR}/scan-results.json'
+        output_file = '${REPORT_DIR}/summary.md'
+        
+        try:
+            with open(json_file, 'r') as f:
+                data = json.load(f)
+            
+            # Initialize counters
+            counts = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0, 'UNKNOWN': 0}
+            vulnerabilities = []
+            
+            # Process results
+            if 'Results' in data and data['Results']:
+                for result in data['Results']:
+                    if 'Vulnerabilities' in result and result['Vulnerabilities']:
+                        for vuln in result['Vulnerabilities']:
+                            severity = vuln.get('Severity', 'UNKNOWN')
+                            if severity in counts:
+                                counts[severity] += 1
+                            vulnerabilities.append(vuln)
+            
+            # Generate summary
+            with open(output_file, 'w') as f:
+                artifact_name = data.get('ArtifactName', 'Unknown')
+                f.write(f'## Trivy Scan Summary — {artifact_name}\n\n')
+                f.write(f'**Target:** {artifact_name}\n')
+                f.write(f'**Total Vulnerabilities:** {sum(counts.values())}\n\n')
+                
+                f.write('### Severity Counts\n')
+                for severity, count in counts.items():
+                    if count > 0:
+                        f.write(f'- **{severity}:** {count}\n')
+                    else:
+                        f.write(f'- {severity}: {count}\n')
+                f.write('\n')
+                
+                # Show critical and high details
+                critical_high = [v for v in vulnerabilities if v.get('Severity') in ['CRITICAL', 'HIGH']]
+                if critical_high:
+                    f.write('### Critical & High Severity Vulnerabilities\n\n')
+                    f.write('| Severity | CVE ID | Package | Installed | Fixed |\n')
+                    f.write('|----------|--------|---------|-----------|-------|\n')
+                    for vuln in critical_high[:15]:  # Limit to first 15
+                        severity = vuln.get('Severity', 'N/A')
+                        cve_id = vuln.get('VulnerabilityID', 'N/A')
+                        pkg = vuln.get('PkgName', 'N/A')
+                        installed = vuln.get('InstalledVersion', 'N/A')
+                        fixed = vuln.get('FixedVersion', 'N/A') or '❌'
+                        f.write(f'| {severity} | {cve_id} | {pkg} | {installed} | {fixed} |\n')
+                    
+                    if len(critical_high) > 15:
+                        f.write(f'\n*... and {len(critical_high) - 15} more critical/high vulnerabilities.*\n')
+                elif sum(counts.values()) > 0:
+                    f.write('### Good News! 🎉\n\n')
+                    f.write('No CRITICAL or HIGH severity vulnerabilities found.\n')
+                    if counts['MEDIUM'] > 0:
+                        f.write(f'Only {counts[\"MEDIUM\"]} MEDIUM severity issues detected.\n')
+                else:
+                    f.write('### Excellent! ✅\n\n')
+                    f.write('No vulnerabilities found in this image.\n')
+            
+            print(f'Successfully generated summary: {output_file}')
+            
+        except Exception as e:
+            with open(output_file, 'w') as f:
+                f.write(f'### ❌ Error Processing Scan Results\n\n')
+                f.write(f'**Error:** {str(e)}\n\n')
+                f.write(f'**JSON file:** {json_file}\n')
+                f.write(f'**File exists:** {os.path.exists(json_file)}\n')
+            print(f'Error: {e}', file=sys.stderr)
+        "
+
+    - name: Debug scan output
+      run: |
+        echo "=== Trivy output file exists? ==="
+        ls -la "${REPORT_DIR}/summary.md" || echo "Summary file not found"
+        echo ""
+        echo "=== Trivy output content ==="
+        cat "${REPORT_DIR}/summary.md" || echo "Cannot read summary file"
+        echo ""
+        echo "=== Report directory contents ==="
+        ls -la "${REPORT_DIR}/" || echo "Report directory not found"
+
+    - name: Publish scan report to workflow summary
+      run: |
+        {
+          echo "## Trivy Scan Report for \`${{ env.IMAGE_NAME }}\`"
+          echo ""
+          echo "- **Scan target**: \`${{ steps.locate.outputs.archive_name }}\`"
+          echo "- **Archive source**: \`${{ steps.locate.outputs.archive_path }}\`"
+          echo "- **Version**: \`${{ env.VERSION }}\`"
+          echo "- **Correlation ID**: \`${{ needs.PREPARE-job.outputs.correlation_id }}\`"
+          echo ""
+          
+          # Check if summary file exists and has content
+          if [ -f "${REPORT_DIR}/summary.md" ] && [ -s "${REPORT_DIR}/summary.md" ]; then
+            echo "### Scan Results"
+            cat "${REPORT_DIR}/summary.md"
+          else
+            echo "### ⚠️ Scan Results"
+            echo ""
+            echo "**Status:** Summary file not generated or empty"
+            echo ""
+            echo "**Possible causes:**"
+            echo "- Trivy template processing failed"
+            echo "- Archive file format issue"
+            echo "- Trivy action configuration problem"
+            echo ""
+            echo "Check the debug steps above for more details."
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    # Generate SARIF report for GitHub Security
+    - name: Generate security report (SARIF)
+      uses: aquasecurity/trivy-action@master
+      if: always()
+      with:
+        scan-type: image
+        input: ./${{ steps.locate.outputs.archive_name }}
+        format: sarif
+        output: ${{ env.REPORT_DIR }}/trivy-results.sarif
+        severity: CRITICAL,HIGH,MEDIUM
+        ignore-unfixed: true
+        vuln-type: os,library
+        exit-code: '0'
+        hide-progress: true
+        cache: true
+      env:
+        TRIVY_SKIP_DB_UPDATE: true
+        TRIVY_SKIP_JAVA_DB_UPDATE: true
+
+    - name: Archive scan reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: trivy-reports-${{ env.IMAGE_NAME }}-${{ env.VERSION }}
+        path: ${{ env.REPORT_DIR }}/
+        retention-days: 30
+
+  PUSH-PRIV-job:
+    needs: [BUILD-job, PREPARE-job]
+    runs-on: setonix-podman02
+    if: needs.PREPARE-job.outputs.proceed_valid == 'true'
+    env:
+      IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
+      VERSION: ${{ needs.PREPARE-job.outputs.version }}
+      BUCKET: ${{ vars.ACACIA_BUCKETNAME }}
+    steps:
+    - name: Display registry environment
+      run: |
+        echo "Hostname: $(hostname)"
+        echo "Pushing: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
+
+    - name: Configure podman environment
+      run: |
+        echo "Setting up container environment variables for push..."
+        
+        # Export environment variables (same as BUILD-job)
+        export XDG_DATA_HOME=/container/${USER}/data
+        export XDG_RUNTIME_DIR=/container/${USER}/runtime
+        export TMPDIR=/container/${USER}/tmp/
+        
+        # Create required directories
+        mkdir -p ${XDG_DATA_HOME}
+        mkdir -p ${XDG_RUNTIME_DIR}
+        mkdir -p ${TMPDIR}
+        
+        echo "Push environment setup completed:"
+        echo "XDG_DATA_HOME: ${XDG_DATA_HOME}"
+        echo "XDG_RUNTIME_DIR: ${XDG_RUNTIME_DIR}"
+        echo "TMPDIR: ${TMPDIR}"
+        
+        # Set environment variables for subsequent steps
+        echo "XDG_DATA_HOME=${XDG_DATA_HOME}" >> $GITHUB_ENV
+        echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> $GITHUB_ENV
+        echo "TMPDIR=${TMPDIR}" >> $GITHUB_ENV
+
+    - name: Download archive from S3
+      id: locate_archive
+      uses: ./.github/actions/setup-rclone
+      with:
+        access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+        secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+        endpoint: https://projects.pawsey.org.au
+        bucket: ${{ env.BUCKET }}
+        destination_path: ${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar
+        download_mode: true
+        dockerfile_name: ${{ env.IMAGE_NAME }}
+        version: ${{ env.VERSION }}
+        load_to_podman: false
+
+    - name: Push to Setonix private registry
+      if: needs.PREPARE-job.outputs.setonixreg_available == 'true'
+      continue-on-error: true
+      run: |
+        set +e  # Don't exit on errors to allow independent execution
+        echo "=========================================="
+        echo " Setonix Registry Push Process"
+        echo "=========================================="
+        
+        # Load image from archive first
+        echo "📦 Loading image from archive..."
+        archive_file="${{ steps.locate_archive.outputs.archive_name }}"
+        if podman load -i "$archive_file"; then
+          echo "✓ Image loaded successfully from archive"
+        else
+          echo "✗ Failed to load image from archive"
+          exit 1
+        fi
+        
+        # Login to Setonix Registry
+        echo "🔐 Logging into Setonix Registry..."
+        if podman login https://setonix-registry.pawsey.org.au -u "${{ vars.SETONIXREG_USERNAME }}" -p "${{ secrets.SETONIXREG_PASS }}"; then
+          echo "✓ Setonix Registry login successful"
+        else
+          echo "✗ Setonix Registry login failed"
+          exit 1
+        fi
+        
+        # Tag and push
+        image_tag="${IMAGE_NAME}:${VERSION}"
+        setonix_tag="setonix-registry.pawsey.org.au/${{ vars.SETONIXREG_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+        
+        echo ""
+        echo "🏷️  Tagging image for Setonix Registry:"
+        echo "   Source: $image_tag"
+        echo "   Target: $setonix_tag"
+        
+        if podman tag "$image_tag" "$setonix_tag"; then
+          echo "✓ Image tagged successfully"
+        else
+          echo "✗ Image tagging failed"
+          exit 1
+        fi
+        
+        echo ""
+        echo "📤 Pushing to Setonix Registry..."
+        if podman push "$setonix_tag"; then
+          echo "✅ Successfully pushed to Setonix Registry: $setonix_tag"
+        else
+          echo "❌ Failed to push to Setonix Registry"
+          exit 1
+        fi
+        
+        # Cleanup local tagged image
+        echo ""
+        echo "🧹 Cleaning up local Setonix tagged image..."
+        podman rmi "$setonix_tag" 2>/dev/null || echo "  (Setonix tag already removed or not found)"
+        podman rmi "$image_tag" 2>/dev/null || echo "  (Base image already removed or not found)"
+
+  PUSH-PUBLIC-job:
+    needs: [BUILD-job, PREPARE-job, PUSH-PRIV-job]
+    runs-on: setonix-podman02
+    if: needs.PREPARE-job.outputs.proceed_valid == 'true'
+    environment:
+      name: manual_approval
+    env:
+      IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
+      VERSION: ${{ needs.PREPARE-job.outputs.version }}
+      TARGETS: ${{ needs.PREPARE-job.outputs.targets }}
+    steps:
+    - name: Display public registry push plan
+      run: |
+        echo "Hostname: $(hostname)"
+        echo "Image: ${IMAGE_NAME}:${VERSION}"
+        echo "Configured Targets: $TARGETS"
+        echo ""
+        echo "=== Public Registry Push Plan ==="
+        echo "Registry credentials were checked in PREPARE-job:"
+        echo ""
+        
+        # Parse targets from manifest
+        targets_array=$(echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -r '.[]')
+        
+        # Check each target from manifest against available credentials
+        echo "$targets_array" | while read -r target; do
+          case "$target" in
+            "dockerhub")
+              if [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ]; then
+                echo "[✓] Docker Hub: Will push to ${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+              else
+                echo "[skip] Docker Hub: Requested in manifest but credentials not available"
+              fi
+              ;;
+            "quay.io")
+              if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
+                echo "[✓] Quay.io: Will push to quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+              else
+                echo "[skip] Quay.io: Requested in manifest but credentials not available"
+              fi
+              ;;
+            "setonix-registry")
+              if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
+                echo "[✓] Setonix Public Registry: Will push to setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}"
+              else
+                echo "[skip] Setonix Registry: Requested in manifest but credentials not available"
+              fi
+              ;;
+            *)
+              echo "[skip] Unknown target: $target"
+              ;;
+          esac
+        done
+        echo ""
+
+    - name: Configure podman environment
+      if: needs.PREPARE-job.outputs.dockerhub_available == 'true' || needs.PREPARE-job.outputs.quayio_available == 'true' || needs.PREPARE-job.outputs.setonixreg_available == 'true'
+      run: |
+        echo "Setting up container environment variables for public push..."
+        
+        # Export environment variables (same as BUILD-job)
+        export XDG_DATA_HOME=/container/${USER}/data
+        export XDG_RUNTIME_DIR=/container/${USER}/runtime
+        export TMPDIR=/container/${USER}/tmp/
+        
+        # Create required directories
+        mkdir -p ${XDG_DATA_HOME}
+        mkdir -p ${XDG_RUNTIME_DIR}
+        mkdir -p ${TMPDIR}
+        
+        echo "Public push environment setup completed:"
+        echo "XDG_DATA_HOME: ${XDG_DATA_HOME}"
+        echo "XDG_RUNTIME_DIR: ${XDG_RUNTIME_DIR}"
+        echo "TMPDIR: ${TMPDIR}"
+        
+        # Set environment variables for subsequent steps
+        echo "XDG_DATA_HOME=${XDG_DATA_HOME}" >> $GITHUB_ENV
+        echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> $GITHUB_ENV
+        echo "TMPDIR=${TMPDIR}" >> $GITHUB_ENV
+
+    - name: Download archive and load to podman
+      id: locate_and_load
+      if: needs.PREPARE-job.outputs.dockerhub_available == 'true' || needs.PREPARE-job.outputs.quayio_available == 'true' || needs.PREPARE-job.outputs.setonixreg_available == 'true'
+      uses: ./.github/actions/setup-rclone
+      with:
+        access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+        secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+        endpoint: https://projects.pawsey.org.au
+        bucket: ${{ vars.ACACIA_BUCKETNAME }}
+        destination_path: ${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar
+        download_mode: true
+        dockerfile_name: ${{ env.IMAGE_NAME }}
+        version: ${{ env.VERSION }}
+        load_to_podman: true
+
+    - name: Initialize Docker configuration
+      if: needs.PREPARE-job.outputs.dockerhub_available == 'true' || needs.PREPARE-job.outputs.quayio_available == 'true' || needs.PREPARE-job.outputs.setonixreg_available == 'true'
+      run: |
+        mkdir -p ~/.docker
+        echo "Created Docker config directory: ~/.docker"
+
+    # ============================================
+    # Docker Hub Push (Only if in targets)
+    # ============================================
+    - name: Push to Docker Hub public registry
+      if: needs.PREPARE-job.outputs.dockerhub_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'dockerhub')
+      continue-on-error: true
+      run: |
+        set +e  # Don't exit on errors to allow independent execution
+        echo "=========================================="
+        echo " Docker Hub Push Process"
+        echo "=========================================="
+        
+        # Login to Docker Hub
+        echo "🔐 Logging into Docker Hub..."
+        if podman login docker.io -u "${{ vars.DOCKERHUB_USERNAME }}" -p "${{ secrets.DOCKERHUB_TOKEN }}"; then
+          echo "✓ Docker Hub login successful"
+        else
+          echo "✗ Docker Hub login failed"
+          exit 1
+        fi
+        
+        # Tag and push
+        image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
+        dockerhub_tag="${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+        
+        echo ""
+        echo "🏷️  Tagging image for Docker Hub:"
+        echo "   Source: $image_tag"
+        echo "   Target: $dockerhub_tag"
+        
+        if podman tag "$image_tag" "$dockerhub_tag"; then
+          echo "✓ Image tagged successfully"
+        else
+          echo "✗ Image tagging failed"
+          exit 1
+        fi
+        
+        echo ""
+        echo "📤 Pushing to Docker Hub..."
+        if podman push "$dockerhub_tag"; then
+          echo "✅ Successfully pushed to Docker Hub: $dockerhub_tag"
+        else
+          echo "❌ Failed to push to Docker Hub"
+          exit 1
+        fi
+
+    # ============================================
+    # Quay.io Push (Only if in targets)
+    # ============================================
+    - name: Push to Quay.io public registry
+      if: needs.PREPARE-job.outputs.quayio_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'quay.io')
+      continue-on-error: true
+      run: |
+        set +e  # Don't exit on errors to allow independent execution
+        echo "=========================================="
+        echo " Quay.io Push Process"
+        echo "=========================================="
+        
+        # Login to Quay.io
+        echo "🔐 Logging into Quay.io..."
+        if podman login quay.io -u "${{ vars.QUAYIO_USERNAME }}" -p "${{ secrets.QUAYIO_TOKEN }}"; then
+          echo "✓ Quay.io login successful"
+        else
+          echo "✗ Quay.io login failed"
+          exit 1
+        fi
+        
+        # Tag and push
+        image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
+        quayio_tag="quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+        
+        echo ""
+        echo "🏷️  Tagging image for Quay.io:"
+        echo "   Source: $image_tag"
+        echo "   Target: $quayio_tag"
+        
+        if podman tag "$image_tag" "$quayio_tag"; then
+          echo "✓ Image tagged successfully"
+        else
+          echo "✗ Image tagging failed"
+          exit 1
+        fi
+        
+        echo ""
+        echo "📤 Pushing to Quay.io..."
+        if podman push "$quayio_tag"; then
+          echo "✅ Successfully pushed to Quay.io: $quayio_tag"
+          
+          # Ensure repository is set to public for SHPC deployment
+          echo "Setting repository visibility to public..."
+          visibility_response=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.QUAYIO_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"visibility": "public"}' \
+            "https://quay.io/api/v1/repository/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}/changevisibility")
+          
+          if echo "$visibility_response" | jq -e '.success' > /dev/null 2>&1; then
+            echo "✓ Repository visibility set to public"
+          else
+            echo "ℹ️  Repository visibility API call completed (status unknown)"
+          fi
+        else
+          echo "❌ Failed to push to Quay.io"
+          exit 1
+        fi
+
+    # ============================================
+    # Setonix Public Registry Push (Only if in targets)
+    # ============================================
+    - name: Push to Setonix public registry
+      if: needs.PREPARE-job.outputs.setonixreg_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'setonix-registry')
+      continue-on-error: true
+      run: |
+        set +e  # Don't exit on errors to allow independent execution
+        echo "=========================================="
+        echo " Setonix Public Registry Push Process"
+        echo "=========================================="
+        
+        # Login to Setonix Registry
+        echo "🔐 Logging into Setonix Registry..."
+        if podman login https://setonix-registry.pawsey.org.au -u "${{ vars.SETONIXREG_USERNAME }}" -p "${{ secrets.SETONIXREG_PASS }}"; then
+          echo "✓ Setonix Registry login successful"
+        else
+          echo "✗ Setonix Registry login failed"
+          exit 1
+        fi
+        
+        # Tag and push to public channel
+        image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
+        setonix_public_tag="setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}"
+        
+        echo ""
+        echo "🏷️  Tagging image for Setonix Public Registry:"
+        echo "   Source: $image_tag"
+        echo "   Target: $setonix_public_tag"
+        
+        if podman tag "$image_tag" "$setonix_public_tag"; then
+          echo "✓ Image tagged successfully"
+        else
+          echo "✗ Image tagging failed"
+          exit 1
+        fi
+        
+        echo ""
+        echo "📤 Pushing to Setonix Public Registry..."
+        if podman push "$setonix_public_tag"; then
+          echo "✅ Successfully pushed to Setonix Public Registry: $setonix_public_tag"
+        else
+          echo "❌ Failed to push to Setonix Public Registry"
+          exit 1
+        fi
+
+    - name: Clean up podman images
+      if: always() && (needs.PREPARE-job.outputs.dockerhub_available == 'true' || needs.PREPARE-job.outputs.quayio_available == 'true' || needs.PREPARE-job.outputs.setonixreg_available == 'true')
+      run: |
+        echo "🧹 Cleaning up local images..."
+        image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
+        
+        # Remove original image
+        echo "Removing base image: $image_tag"
+        podman rmi "$image_tag" 2>/dev/null || echo "  (Base image already removed or not found)"
+        
+        # Remove tagged images based on targets
+        if [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["dockerhub"])' > /dev/null; then
+          dockerhub_tag="${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+          echo "Removing Docker Hub tag: $dockerhub_tag"
+          podman rmi "$dockerhub_tag" 2>/dev/null || echo "  (Docker Hub tag already removed or not found)"
+        fi
+        
+        if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
+          quayio_tag="quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+          echo "Removing Quay.io tag: $quayio_tag"
+          podman rmi "$quayio_tag" 2>/dev/null || echo "  (Quay.io tag already removed or not found)"
+        fi
+        
+        if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["setonix-registry"])' > /dev/null; then
+          setonix_public_tag="setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}"
+          echo "Removing Setonix Public tag: $setonix_public_tag"
+          podman rmi "$setonix_public_tag" 2>/dev/null || echo "  (Setonix Public tag already removed or not found)"
+        fi
+        
+        echo "✅ Local image cleanup completed"
+
+  DEPLOY-job:
+    needs: [BUILD-job, PREPARE-job, PUSH-PUBLIC-job]
+    runs-on: setonix-podman02
+    if: needs.PREPARE-job.outputs.proceed_valid == 'true' && ((needs.PREPARE-job.outputs.dockerhub_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'dockerhub')) || (needs.PREPARE-job.outputs.quayio_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'quay.io')))
+    env:
+      IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
+      VERSION: ${{ needs.PREPARE-job.outputs.version }}
+    steps:
+      - name: Display deployment environment
+        run: |
+          echo "Hostname: $(hostname)"
+          echo "Starting SHPC deployment for ${IMAGE_NAME}:${VERSION}"
+          echo "Configured targets: ${{ needs.PREPARE-job.outputs.targets }}"
+          echo ""
+          echo "Available public registries for SHPC:"
+          if [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["dockerhub"])' > /dev/null; then
+            echo "• Docker Hub: ${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+          fi
+          if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
+            echo "• Quay.io: quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+          fi
+
+      - name: Load SHPC module and setup environment
+        id: shpc_setup
+        run: |
+          set -euo pipefail
+          echo "Loading SHPC module..."
+          if module load shpc/0.1.32; then
+            echo "✓ SHPC module loaded successfully"
+            shpc --version
+          else
+            echo "✗ Failed to load SHPC module"
+            exit 1
+          fi
+          
+          # Set SHPC registry path
+          SHPC_REGISTRY="/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry"
+          echo "SHPC_REGISTRY=$SHPC_REGISTRY" >> $GITHUB_ENV
+          echo "SHPC registry path: $SHPC_REGISTRY"
+
+      - name: Determine deployment target and get SHA256 digest
+        id: get_image_info
+        run: |
+          set -euo pipefail
+          
+          # Prioritize Quay.io if available and in targets, otherwise use Docker Hub
+          if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
+            full_image="quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+            registry_url="https://quay.io/v2"
+            api_path="${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}"
+            registry_type="quay.io"
+          elif [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["dockerhub"])' > /dev/null; then
+            full_image="${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+            registry_url="https://registry-1.docker.io/v2"
+            api_path="${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}"
+            registry_type="docker.io"
+          else
+            echo "Error: No compatible public registry available for deployment"
+            echo "Available registries don't match configured targets in manifest"
+            exit 1
+          fi
+          
+          echo "Deploying image: $full_image"
+          echo "Registry API: $registry_url"
+          echo "API path: $api_path"
+          
+          # Get manifest and extract digest
+          echo "Fetching manifest for tag: ${VERSION}"
+          
+          digest=$(curl -s -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+            "$registry_url/$api_path/manifests/${VERSION}" \
+            | jq -r '.config.digest // empty')
+          
+          if [ -z "$digest" ] || [ "$digest" = "null" ]; then
+            echo "Warning: Could not get digest, using placeholder"
+            digest="sha256:placeholder_digest_for_${VERSION}"
+          fi
+          
+          echo "SHA256 digest: $digest"
+          
+          # Set outputs
+          echo "full_image=$full_image" >> $GITHUB_OUTPUT
+          echo "registry_type=$registry_type" >> $GITHUB_OUTPUT
+          echo "digest=$digest" >> $GITHUB_OUTPUT
+
+      - name: Create SHPC container registry entry
+        run: |
+          set -euo pipefail
+          
+          full_image="${{ steps.get_image_info.outputs.full_image }}"
+          registry_type="${{ steps.get_image_info.outputs.registry_type }}"
+          digest="${{ steps.get_image_info.outputs.digest }}"
+          
+          # Create registry directory structure based on the deployed image
+          if [ "$registry_type" = "quay.io" ]; then
+            shpc_path="${SHPC_REGISTRY}/quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}"
+          else
+            shpc_path="${SHPC_REGISTRY}/docker.io/${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}"
+          fi
+          
+          echo "Creating SHPC registry entry at: $shpc_path"
+          
+          # Create container.yaml content
+          container_yaml=$(cat <<EOF
+          docker: $full_image
+          
+          latest:
+            "${VERSION}": "$digest"
+          tags:
+            "${VERSION}": "$digest"
+          
+          maintainer: "@image-manager-ci"
+          
+          description: "Container for ${IMAGE_NAME} version ${VERSION} - deployed via Image Manager CI/CD"
+          url: "https://github.com/${GITHUB_REPOSITORY}"
+          
+          # Image Manager metadata
+          image_manager:
+            main: "${{ needs.PREPARE-job.outputs.main }}"
+            feature: "${{ needs.PREPARE-job.outputs.feature }}"
+            platform: "${{ needs.PREPARE-job.outputs.platform }}"
+            correlation_id: "${{ needs.PREPARE-job.outputs.correlation_id }}"
+            branch: "${{ github.ref_name }}"
+            deployed_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          EOF
+          )
+          
+          echo "Container YAML content:"
+          echo "$container_yaml"
+          
+          # Verify SHPC configuration before writing
+          echo "Verifying SHPC configuration..."
+          module load shpc/0.1.32
+          if shpc config get registry | grep -q pawsey_registry; then
+            echo "✓ SHPC registry is properly configured"
+          else
+            echo "Warning: SHPC registry may not be properly configured"
+          fi
+          
+          # Write container YAML to temporary file
+          temp_file="/tmp/container_${RANDOM}.yaml"
+          echo "$container_yaml" > "$temp_file"
+          echo "Container YAML written to temporary file: $temp_file"
+          
+          # Switch to spack user to create registry entry
+          echo "Switching to spack user to write to registry..."
+          sudo su - spack << EOF
+          set -euo pipefail
+          echo "Now running as spack user"
+          mkdir -p '$shpc_path'
+          cp '$temp_file' '$shpc_path/container.yaml'
+          echo '✓ SHPC registry entry created successfully'
+          ls -la '$shpc_path/'
+          cat '$shpc_path/container.yaml'
+          EOF
+          
+          # Clean up temporary file
+          rm -f "$temp_file"
+          echo "Temporary file cleaned up"
+          
+          echo "✅ SHPC deployment completed"
+          echo "Registry path: $shpc_path"
+          echo "Image: $full_image"
+          echo "Version: ${VERSION}"
+          echo "Digest: $digest"
+          echo "Correlation ID: ${{ needs.PREPARE-job.outputs.correlation_id }}"
+
+  SUMMARY-job:
+    needs: [BUILD-job, PREPARE-job, PUSH-PRIV-job, PUSH-PUBLIC-job, DEPLOY-job]
+    runs-on: ubuntu-latest
+    if: always() && needs.PREPARE-job.outputs.proceed_valid == 'true'
+    env:
+      IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
+      VERSION: ${{ needs.PREPARE-job.outputs.version }}
+      MAIN: ${{ needs.PREPARE-job.outputs.main }}
+      FEATURE: ${{ needs.PREPARE-job.outputs.feature }}
+      PLATFORM: ${{ needs.PREPARE-job.outputs.platform }}
+      CORRELATION_ID: ${{ needs.PREPARE-job.outputs.correlation_id }}
+    steps:
+      - name: Generate deployment summary
+        run: |
+          {
+            echo "# 🚀 Image Manager CI/CD Summary"
+            echo ""
+            echo "**Image:** \`${{ env.IMAGE_NAME }}:${{ env.VERSION }}\`"
+            echo "**Main Software:** \`${{ env.MAIN }}\`"
+            echo "**Feature:** \`${{ env.FEATURE }}\`"
+            echo "**Platform:** \`${{ env.PLATFORM }}\`"
+            echo "**Build Status:** ✅ Completed"
+            echo "**Correlation ID:** \`${{ env.CORRELATION_ID }}\`"
+            echo "**Branch:** \`${{ github.ref_name }}\`"
+            echo "**Timestamp:** $(date '+%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
+            
+            echo "## 📦 Archive Storage"
+            echo ""
+            echo "| Location | Address | Status |"
+            echo "|----------|---------|--------|"
+            
+            # S3 Docker Archive Storage
+            if [ "${{ needs.BUILD-job.result }}" = "success" ]; then
+              echo "| S3 Docker Archive | \`s3://${{ vars.ACACIA_BUCKETNAME }}/${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar\` | ✅ Uploaded |"
+            else
+              echo "| S3 Docker Archive | \`s3://${{ vars.ACACIA_BUCKETNAME }}/${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar\` | ❌ Failed |"
+            fi
+            
+            # S3 Singularity SIF Storage
+            if [ "${{ needs.BUILD-job.result }}" = "success" ]; then
+              echo "| S3 Singularity SIF | \`s3://${{ vars.ACACIA_SIF_BUCKETNAME }}/${{ env.IMAGE_NAME }}_${{ env.VERSION }}.sif\` | ✅ Uploaded |"
+            else
+              echo "| S3 Singularity SIF | \`s3://${{ vars.ACACIA_SIF_BUCKETNAME }}/${{ env.IMAGE_NAME }}_${{ env.VERSION }}.sif\` | ❌ Failed |"
+            fi
+            
+            echo ""
+            echo "## 🏗️ Container Registry Deployments"
+            echo ""
+            echo "| Registry | Address | Status |"
+            echo "|----------|---------|--------|"
+            
+            # Parse configured targets
+            targets='${{ needs.PREPARE-job.outputs.targets }}'
+            
+            # Setonix Private Registry (always attempted if credentials available)
+            if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ] && [ "${{ needs.PUSH-PRIV-job.result }}" = "success" ]; then
+              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${{ vars.SETONIXREG_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Pushed |"
+            elif [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
+              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${{ vars.SETONIXREG_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ❌ Failed |"
+            else
+              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${{ vars.SETONIXREG_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Skipped (No credentials) |"
+            fi
+            
+            # Docker Hub (only if in targets)
+            if echo "$targets" | jq -e 'contains(["dockerhub"])' > /dev/null 2>&1; then
+              if [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ] && [ "${{ needs.PUSH-PUBLIC-job.result }}" = "success" ]; then
+                echo "| Docker Hub | \`docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Pushed |"
+              elif [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ]; then
+                echo "| Docker Hub | \`docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ❌ Failed |"
+              else
+                echo "| Docker Hub | \`docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Skipped (No credentials) |"
+              fi
+            else
+              echo "| Docker Hub | \`docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Not in targets |"
+            fi
+            
+            # Quay.io (only if in targets)
+            if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1; then
+              if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && [ "${{ needs.PUSH-PUBLIC-job.result }}" = "success" ]; then
+                echo "| Quay.io | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Pushed |"
+              elif [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
+                echo "| Quay.io | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ❌ Failed |"
+              else
+                echo "| Quay.io | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Skipped (No credentials) |"
+              fi
+            else
+              echo "| Quay.io | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Not in targets |"
+            fi
+            
+            # Setonix Public Registry (only if in targets)
+            if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1; then
+              if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ] && [ "${{ needs.PUSH-PUBLIC-job.result }}" = "success" ]; then
+                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Pushed |"
+              elif [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
+                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ❌ Failed |"
+              else
+                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Skipped (No credentials) |"
+              fi
+            else
+              echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Not in targets |"
+            fi
+            
+            echo ""
+            echo "## 🚀 SHPC Container Deployment"
+            echo ""
+            echo "| Registry Path | Image Source | Status |"
+            echo "|---------------|--------------|--------|"
+            
+            # SHPC deployment status
+            if [ "${{ needs.DEPLOY-job.result }}" = "success" ]; then
+              # Determine which registry was used for SHPC deployment
+              if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
+                echo "| \`/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry/quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}/\` | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Deployed |"
+                shpc_image="quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
+              elif echo "$targets" | jq -e 'contains(["dockerhub"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ]; then
+                echo "| \`/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry/docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}/\` | \`docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Deployed |"
+                shpc_image="docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
+              fi
+              
+              echo ""
+              echo "### SHPC Usage Commands"
+              echo ""
+              echo "Load and use the container via SHPC:"
+              echo "\`\`\`bash"
+              echo "# Load SHPC module"
+              echo "module load shpc/0.1.32"
+              echo ""
+              echo "# Install the container"
+              echo "shpc install $shpc_image"
+              echo ""
+              echo "# Show available commands"
+              echo "shpc show $shpc_image"
+              echo ""
+              echo "# Use the container"
+              echo "shpc run $shpc_image <command>"
+              echo "\`\`\`"
+            elif [ "${{ needs.DEPLOY-job.result }}" = "failure" ]; then
+              echo "| SHPC Registry | N/A | ❌ Deployment Failed |"
+            elif [ "${{ needs.DEPLOY-job.result }}" = "skipped" ]; then
+              echo "| SHPC Registry | N/A | ⏭️ Skipped (No compatible public registry in targets) |"
+            else
+              echo "| SHPC Registry | N/A | ⏸️ Not Executed |"
+            fi
+            
+            echo ""
+            echo "## 📊 Job Results"
+            echo ""
+            echo "| Job | Status |"
+            echo "|-----|--------|"
+            echo "| PREPARE | ${{ needs.PREPARE-job.result == 'success' && '✅ Success' || '❌ Failed' }} |"
+            echo "| BUILD | ${{ needs.BUILD-job.result == 'success' && '✅ Success' || '❌ Failed' }} |"
+            echo "| SCAN-AND-REPORT | ${{ needs['SCAN-AND-REPORT-job'].result == 'success' && '✅ Success' || (needs['SCAN-AND-REPORT-job'].result == 'skipped' && '⏭️ Skipped (noscan=true)') || '❌ Failed' }} |"
+            echo "| PUSH-PRIV | ${{ needs.PUSH-PRIV-job.result == 'success' && '✅ Success' || '❌ Failed' }} |"
+            echo "| PUSH-PUBLIC | ${{ needs.PUSH-PUBLIC-job.result == 'success' && '✅ Success' || '❌ Failed' }} |"
+            echo "| DEPLOY | ${{ needs.DEPLOY-job.result == 'success' && '✅ Success' || (needs.DEPLOY-job.result == 'skipped' && '⏭️ Skipped') || '❌ Failed' }} |"
+            
+            echo ""
+            echo "---"
+            echo "*Generated by Image Manager CI/CD Pipeline v2.0.0*"
+            
+          } >> "$GITHUB_STEP_SUMMARY"

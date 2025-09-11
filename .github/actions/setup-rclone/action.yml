@@ -1,0 +1,479 @@
+name: 'Setup Rclone'
+description: 'Configures rclone for S3 operations using system module rclone/1.68.1. Supports downloading archives from S3 and uploading files to S3 with optimized settings.'
+inputs:
+  access_key_id:
+    description: 'Access Key ID for S3'
+    required: true
+  secret_access_key:
+    description: 'Secret Access Key for S3'
+    required: true
+  endpoint:
+    description: 'S3 Endpoint URL'
+    required: true
+  bucket:
+    description: 'S3 Bucket Name'
+    required: true
+  destination_path:
+    description: 'Destination path in the S3 bucket'
+    required: true
+  # Download-specific inputs
+  download_mode:
+    description: 'Whether to download archive from S3 (true/false)'
+    required: false
+    default: 'false'
+  dockerfile_name:
+    description: 'Dockerfile name for download (e.g., ex1) - required when download_mode=true'
+    required: false
+  version:
+    description: 'Version for download (e.g., 0.0.5) - required when download_mode=true'
+    required: false
+  load_to_podman:
+    description: 'Whether to load the downloaded archive into podman'
+    required: false
+    default: 'false'
+  # Upload-specific inputs
+  upload_mode:
+    description: 'Whether to upload file to S3 (true/false)'
+    required: false
+    default: 'false'
+  upload_file:
+    description: 'Local file path to upload - required when upload_mode=true'
+    required: false
+  upload_file_type:
+    description: 'Type of file being uploaded (archive/sif) for output naming'
+    required: false
+    default: 'archive'
+outputs:
+  rclone_loaded:
+    description: 'Indicates if rclone module was loaded successfully'
+    value: ${{ steps.load_rclone.outputs.loaded }}
+  # Download-specific outputs
+  archive_downloaded:
+    description: 'Indicates if archive was downloaded'
+    value: ${{ steps.download.outputs.downloaded }}
+  archive_name:
+    description: 'Downloaded archive filename'
+    value: ${{ steps.download.outputs.archive_name }}
+  archive_path:
+    description: 'Full local path to downloaded archive'
+    value: ${{ steps.download.outputs.archive_path }}
+  archive_source:
+    description: 'S3 source path of the archive'
+    value: ${{ steps.download.outputs.archive_source }}
+  image_tag:
+    description: 'Image tag if loaded to podman'
+    value: ${{ steps.load.outputs.image_tag }}
+  # Upload-specific outputs
+  file_uploaded:
+    description: 'Indicates if file was uploaded to S3'
+    value: ${{ steps.upload.outputs.uploaded }}
+  upload_bucket:
+    description: 'S3 bucket where file was uploaded'
+    value: ${{ steps.upload.outputs.s3_bucket }}
+  upload_path:
+    description: 'S3 path of the uploaded file'
+    value: ${{ steps.upload.outputs.s3_path }}
+  upload_size:
+    description: 'Size of the uploaded file'
+    value: ${{ steps.upload.outputs.file_size }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Load rclone module
+      id: load_rclone
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Loading rclone module..."
+        if module load rclone/1.68.1; then
+          echo "✓ rclone module loaded successfully"
+          echo "loaded=true" >> $GITHUB_OUTPUT
+          # Verify rclone is available
+          if command -v rclone >/dev/null 2>&1; then
+            echo "✓ rclone command is available"
+            rclone version
+          else
+            echo "✗ rclone command not found after module load"
+            exit 1
+          fi
+        else
+          echo "✗ Failed to load rclone module"
+          exit 1
+        fi
+
+    - name: Configure rclone (local config)
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Load rclone module
+        module load rclone/1.68.1
+        # Store configuration in project-local directory
+        mkdir -p ./.rclone_config
+        tee ./.rclone_config/rclone.conf > /dev/null <<EOF
+        [pawsey0012]
+        type = s3
+        provider = Ceph
+        endpoint = ${{ inputs.endpoint }}
+        access_key_id = ${{ inputs.access_key_id }}
+        secret_access_key = ${{ inputs.secret_access_key }}
+        EOF
+        # Export environment variable so rclone automatically picks up this config
+        echo "RCLONE_CONFIG=$(pwd)/.rclone_config/rclone.conf" >> $GITHUB_ENV
+
+    - name: Verify rclone Configuration
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Load rclone module
+        module load rclone/1.68.1
+        echo "Verifying rclone configuration..."
+        rclone config show
+
+    - name: Debug S3 Connection and Permissions
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Load rclone module
+        module load rclone/1.68.1
+        
+        bucket="${{ inputs.bucket }}"
+        endpoint="${{ inputs.endpoint }}"
+        
+        echo "🔍 S3 Connection and Permission Diagnostics"
+        echo "=============================================="
+        echo "Endpoint: $endpoint"
+        echo "Bucket: $bucket"
+        echo "Provider: Ceph"
+        echo ""
+        
+        # Test 1: Basic rclone connectivity
+        echo "1. Testing basic rclone connectivity..."
+        if rclone version >/dev/null 2>&1; then
+          echo "  ✓ rclone command working"
+        else
+          echo "  ✗ rclone command failed"
+          exit 1
+        fi
+        
+        # Test 2: List available remotes
+        echo ""
+        echo "2. Available rclone remotes:"
+        rclone listremotes || echo "  ✗ Failed to list remotes"
+        
+        # Test 3: Test connection to S3 endpoint
+        echo ""
+        echo "3. Testing connection to S3 endpoint..."
+        if curl -s --max-time 10 "$endpoint" >/dev/null 2>&1; then
+          echo "  ✓ S3 endpoint is reachable"
+        else
+          echo "  ⚠ S3 endpoint may not be reachable (this might be normal for some S3 providers)"
+        fi
+        
+        # Test 4: Try to list buckets (basic auth test)
+        echo ""
+        echo "4. Testing S3 authentication (list buckets)..."
+        if timeout 15 rclone lsd pawsey0012: 2>/dev/null; then
+          echo "  ✓ Authentication successful - can list buckets"
+        else
+          echo "  ✗ Authentication failed or no bucket access"
+          echo "  This could indicate:"
+          echo "    - Invalid access credentials"
+          echo "    - Account doesn't have bucket listing permissions"
+          echo "    - Network connectivity issues"
+        fi
+        
+        # Test 5: Try to access specific bucket
+        echo ""
+        echo "5. Testing access to target bucket: $bucket"
+        if timeout 15 rclone lsf pawsey0012:"$bucket/" --max-depth 1 2>/dev/null | head -1; then
+          echo "  ✓ Can access bucket and list contents"
+        else
+          echo "  ✗ Cannot access bucket: $bucket"
+          echo "  Possible reasons:"
+          echo "    - Bucket doesn't exist"
+          echo "    - No read permissions on bucket"
+          echo "    - Bucket name is incorrect"
+          echo "    - Account doesn't have access to this specific bucket"
+        fi
+        
+        # Test 6: Test bucket write permissions with a small test file
+        echo ""
+        echo "6. Testing bucket write permissions..."
+        test_file="rclone_test_$(date +%s).tmp"
+        echo "test_content_$(date)" > "$test_file"
+        
+        if timeout 15 rclone copy "$test_file" pawsey0012:"$bucket/" 2>/dev/null; then
+          echo "  ✓ Write permissions confirmed"
+          # Clean up test file from S3
+          if timeout 10 rclone delete pawsey0012:"$bucket/$test_file" 2>/dev/null; then
+            echo "  ✓ Delete permissions confirmed"
+          else
+            echo "  ⚠ Could upload but not delete test file"
+          fi
+        else
+          echo "  ✗ No write permissions to bucket"
+          echo "  This is the likely cause of your upload failure"
+          echo "  Required permissions:"
+          echo "    - s3:PutObject (to upload files)"
+          echo "    - s3:PutObjectAcl (might be required)"
+          echo "    - s3:GetObject (for verification)"
+        fi
+        
+        # Clean up local test file
+        rm -f "$test_file"
+        
+        # Test 7: Check if we can access specific upload path
+        if [ -n "${{ inputs.destination_path }}" ] && [ "${{ inputs.destination_path }}" != "/" ]; then
+          echo ""
+          echo "7. Testing access to destination path: ${{ inputs.destination_path }}"
+          dest_path="${{ inputs.destination_path }}"
+          if timeout 15 rclone lsf pawsey0012:"$bucket/$dest_path/" 2>/dev/null; then
+            echo "  ✓ Can access destination path"
+          else
+            echo "  ⚠ Cannot access destination path (might be normal if path doesn't exist yet)"
+          fi
+        fi
+        
+        echo ""
+        echo "=============================================="
+        echo "🔍 Diagnostic Summary:"
+        echo "If write test failed above, check your S3 credentials and bucket permissions."
+        echo "The upload operation requires at minimum: s3:PutObject, s3:GetObject permissions."
+        echo "=============================================="
+
+    - name: Download archive from S3
+      id: download
+      if: inputs.download_mode == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Load rclone module
+        module load rclone/1.68.1
+        
+        # Validate required inputs for download mode
+        if [ -z "${{ inputs.dockerfile_name }}" ] || [ -z "${{ inputs.version }}" ]; then
+          echo "Error: dockerfile_name and version are required when download_mode=true"
+          exit 1
+        fi
+        
+        bucket="${{ inputs.bucket }}"
+        archive_file="${{ inputs.dockerfile_name }}_${{ inputs.version }}.tar"
+        
+        echo "Downloading archive from S3..."
+        echo "Bucket: $bucket"
+        echo "Archive: $archive_file"
+        
+        # Download from S3
+        if rclone copy pawsey0012:"$bucket/$archive_file" ./ --progress; then
+          if [ -f "./$archive_file" ]; then
+            file_size=$(ls -lh "./$archive_file" | awk '{print $5}')
+            echo "✓ Archive downloaded successfully from S3"
+            echo "  [SOURCE]: s3://$bucket/$archive_file"
+            echo "  [LOCAL]: ./$archive_file"
+            echo "  [SIZE]: $file_size"
+            
+            echo "downloaded=true" >> "$GITHUB_OUTPUT"
+            echo "archive_name=$archive_file" >> "$GITHUB_OUTPUT"
+            echo "archive_path=${PWD}/$archive_file" >> "$GITHUB_OUTPUT"
+            echo "archive_source=s3://$bucket/$archive_file" >> "$GITHUB_OUTPUT"
+          else
+            echo "✗ Archive download failed - file not found locally"
+            exit 1
+          fi
+        else
+          echo "✗ Failed to download archive from S3"
+          echo "  Tried: s3://$bucket/$archive_file"
+          echo "Available files in bucket:"
+          rclone lsf pawsey0012:"$bucket/" | head -10 || echo "  (Cannot list bucket contents)"
+          exit 1
+        fi
+
+    - name: Load archive into podman
+      id: load
+      if: inputs.download_mode == 'true' && inputs.load_to_podman == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        archive_file="${{ steps.download.outputs.archive_name }}"
+        dockerfile_name="${{ inputs.dockerfile_name }}"
+        version="${{ inputs.version }}"
+        
+        echo "Loading image from archive: $archive_file"
+        podman load -i "$archive_file"
+        
+        # Show all loaded images for debugging
+        echo "All images after load:"
+        podman images
+        
+        # Find the actual loaded image (may have localhost/ prefix or other registry)
+        loaded_image=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "${dockerfile_name}:${version}" | head -1)
+        
+        if [ -n "$loaded_image" ]; then
+          echo "✓ Image loaded successfully: $loaded_image"
+          echo "image_tag=$loaded_image" >> "$GITHUB_OUTPUT"
+        else
+          # Fallback: try to find any image with the dockerfile name
+          fallback_image=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "${dockerfile_name}" | head -1)
+          if [ -n "$fallback_image" ]; then
+            echo "✓ Image loaded with different tag: $fallback_image"
+            echo "image_tag=$fallback_image" >> "$GITHUB_OUTPUT"
+          else
+            echo "✗ Failed to load image: ${dockerfile_name}:${version}"
+            echo "Available images:"
+            podman images
+            exit 1
+          fi
+        fi
+
+    - name: Upload file to S3 storage
+      id: upload
+      if: inputs.upload_mode == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Load rclone module
+        module load rclone/1.68.1
+        
+        # Validate required inputs for upload mode
+        if [ -z "${{ inputs.upload_file }}" ]; then
+          echo "Error: upload_file is required when upload_mode=true"
+          exit 1
+        fi
+        
+        upload_file="${{ inputs.upload_file }}"
+        bucket="${{ inputs.bucket }}"
+        file_type="${{ inputs.upload_file_type }}"
+        
+        # Verify file exists
+        if [ ! -f "$upload_file" ]; then
+          echo "Error: Upload file not found: $upload_file"
+          exit 1
+        fi
+        
+        echo "Uploading file to S3..."
+        echo "File: $upload_file"
+        echo "Bucket: $bucket"
+        echo "Type: $file_type"
+        
+        # Calculate file size for optimization
+        FILE_SIZE=$(wc -c < "$upload_file")
+        echo "File size: $FILE_SIZE bytes"
+        
+        # Set rclone parameters based on file size
+        if [ "$FILE_SIZE" -lt $((1024 * 1024 * 500)) ]; then
+          # < 500MB
+          S3_CHUNK_SIZE="16M"
+          S3_UPLOAD_CONCURRENCY=4
+          MULTI_THREAD_STREAMS=2
+        elif [ "$FILE_SIZE" -lt $((1024 * 1024 * 5000)) ]; then
+          # 500MB - 5GB
+          S3_CHUNK_SIZE="64M"
+          S3_UPLOAD_CONCURRENCY=8
+          MULTI_THREAD_STREAMS=4
+        else
+          # > 5GB
+          S3_CHUNK_SIZE="128M"
+          S3_UPLOAD_CONCURRENCY=16
+          MULTI_THREAD_STREAMS=8
+        fi
+        
+        echo "Optimized settings for $file_type upload:"
+        echo "  S3 chunk size: $S3_CHUNK_SIZE"
+        echo "  Upload concurrency: $S3_UPLOAD_CONCURRENCY"
+        echo "  Multi-thread streams: $MULTI_THREAD_STREAMS"
+        
+        # Upload to S3
+        if rclone copy "$upload_file" pawsey0012:"$bucket/" \
+          --multi-thread-streams=$MULTI_THREAD_STREAMS \
+          --s3-chunk-size=$S3_CHUNK_SIZE \
+          --s3-upload-concurrency=$S3_UPLOAD_CONCURRENCY \
+          --progress; then
+          
+          # Get filename for verification
+          filename=$(basename "$upload_file")
+          
+          # Verify upload
+          if rclone lsf pawsey0012:"$bucket/" | grep -q "^$filename$"; then
+            file_size_human=$(ls -lh "$upload_file" | awk '{print $5}')
+            echo "✓ File successfully uploaded to S3"
+            echo "  [BUCKET]: $bucket"
+            echo "  [S3 PATH]: $filename"
+            echo "  [SIZE]: $file_size_human"
+            
+            # Set outputs
+            echo "uploaded=true" >> "$GITHUB_OUTPUT"
+            echo "s3_bucket=$bucket" >> "$GITHUB_OUTPUT"
+            echo "s3_path=$filename" >> "$GITHUB_OUTPUT"
+            echo "file_size=$file_size_human" >> "$GITHUB_OUTPUT"
+          else
+            echo "✗ Failed to verify S3 upload"
+            exit 1
+          fi
+        else
+          echo "✗ Failed to upload file to S3"
+          echo ""
+          echo "🔍 Upload Failure Diagnostics:"
+          echo "================================"
+          echo "File being uploaded: $upload_file"
+          echo "Target bucket: $bucket"
+          echo "File size: $FILE_SIZE bytes"
+          echo ""
+          
+          # Check if file still exists locally
+          if [ -f "$upload_file" ]; then
+            echo "✓ Local file exists and is readable"
+            ls -la "$upload_file"
+          else
+            echo "✗ Local file missing or not readable"
+          fi
+          
+          echo ""
+          echo "Attempting to diagnose S3 connection issues..."
+          
+          # Test basic connectivity
+          if timeout 10 rclone lsd pawsey0012: 2>/dev/null >/dev/null; then
+            echo "✓ Basic S3 authentication working"
+          else
+            echo "✗ S3 authentication failed"
+            echo "  Check your access credentials"
+          fi
+          
+          # Test bucket access
+          if timeout 10 rclone lsf pawsey0012:"$bucket/" --max-depth 1 2>/dev/null >/dev/null; then
+            echo "✓ Can read from target bucket"
+            echo "Available files in bucket:"
+            rclone lsf pawsey0012:"$bucket/" | head -10 || echo "  (Cannot list bucket contents)"
+          else
+            echo "✗ Cannot access target bucket: $bucket"
+            echo "  Possible issues:"
+            echo "    - Bucket doesn't exist"
+            echo "    - No read/write permissions on bucket"
+            echo "    - Network connectivity problems"
+          fi
+          
+          # Test write permissions with smaller file
+          echo ""
+          echo "Testing write permissions with small test file..."
+          test_file="upload_test_$(date +%s).tmp"
+          echo "test" > "$test_file"
+          
+          if timeout 10 rclone copy "$test_file" pawsey0012:"$bucket/" 2>/dev/null; then
+            echo "✓ Small file upload successful - issue may be with large file handling"
+            echo "  Possible solutions:"
+            echo "    - Check if there are file size limits"
+            echo "    - Try different chunk sizes"
+            echo "    - Check network stability for large transfers"
+            rclone delete pawsey0012:"$bucket/$test_file" 2>/dev/null || true
+          else
+            echo "✗ Cannot upload even small test files"
+            echo "  This confirms a permissions or connectivity issue"
+            echo "  Required S3 permissions:"
+            echo "    - s3:PutObject"
+            echo "    - s3:PutObjectAcl (may be required)"
+            echo "    - s3:GetObject (for verification)"
+          fi
+          
+          rm -f "$test_file"
+          echo "================================"
+          exit 1
+        fi
