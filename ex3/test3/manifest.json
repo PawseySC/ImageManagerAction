@@ -1,7 +1,7 @@
 {
   "main": "ex3",
   "feature": "test3",
-  "version": "0.0.3",
+  "version": "0.0.5",
   "devmode": false,
   "noscan": false,
   "platform": "x86",
@@ -15,7 +15,7 @@
     "path": "ex3/test3/"
   },
   "metadata": {
-    "timestamp": "2025-09-16T23:49:55.775103Z",
-    "correlation_id": "ede75c64-0aa6-4dc5-aafe-6f420859f84e"
+    "timestamp": "2025-09-16T23:59:48.624434Z",
+    "correlation_id": "92b6197b-e281-4fb1-8446-ababa052d295"
   }
 }
