@@ -1,14 +1,13 @@
 {
   "main": "ex3",
   "feature": "test3",
-  "version": "0.1.3",
+  "version": "0.0.3",
   "devmode": false,
   "noscan": false,
   "platform": "x86",
-  "targets": [
-    "dockerhub",
-    "quay.io",
-    "setonix-registry"
+  "targets": [],
+  "private-targets": [
+    "liu268"
   ],
   "github": {
     "repo": "Quleaf/ImageManagerAction",
@@ -16,7 +15,7 @@
     "path": "ex3/test3/"
   },
   "metadata": {
-    "timestamp": "2025-09-11T23:18:25.323718Z",
-    "correlation_id": "cd50e567-ab80-4d80-b71b-729ab13ade5a"
+    "timestamp": "2025-09-16T23:49:55.775103Z",
+    "correlation_id": "ede75c64-0aa6-4dc5-aafe-6f420859f84e"
   }
 }
