@@ -257,7 +257,7 @@ jobs:
           noscan=$(jq -r '.noscan // false' "$manifest_file")
           platform=$(jq -r '.platform // "x86"' "$manifest_file")
           targets=$(jq -c '.targets // []' "$manifest_file")
-          private_targets=$(jq -c '.private-targets // []' "$manifest_file")
+          private_targets=$(jq -c '."private-targets" // []' "$manifest_file")
           correlation_id=$(jq -r '.metadata.correlation_id // empty' "$manifest_file")
           
           # Validate required fields
