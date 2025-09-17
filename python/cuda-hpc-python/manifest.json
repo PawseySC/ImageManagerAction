@@ -1,0 +1,23 @@
+{
+  "main": "python",
+  "feature": "cuda-hpc-python",
+  "version": "0.0.1",
+  "devmode": false,
+  "noscan": false,
+  "platform": "x86",
+  "targets": [
+    "setonix-registry"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-python/cuda-hpc-python",
+    "path": "python/cuda-hpc-python/"
+  },
+  "metadata": {
+    "timestamp": "2025-09-17T09:37:32.597134Z",
+    "correlation_id": "5b3340d6-f8ef-4b79-85b4-929f6a09b878"
+  }
+}
