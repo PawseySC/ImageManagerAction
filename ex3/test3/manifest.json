@@ -1,7 +1,7 @@
 {
   "main": "ex3",
   "feature": "test3",
-  "version": "0.0.21",
+  "version": "0.0.23",
   "devmode": true,
   "noscan": true,
   "platform": "x86",

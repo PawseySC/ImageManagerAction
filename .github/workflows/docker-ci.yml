@@ -977,8 +977,11 @@ jobs:
     needs: [BUILD-job, PREPARE-job, PUSH-PRIV-job]
     runs-on: setonix-podman02
     if: needs.PREPARE-job.outputs.proceed_valid == 'true'
+    # Environment selection based on devmode flag:
+    # - If devmode=true: Use 'devmode_skip_approval' environment (no manual approval required)
+    # - If devmode=false: Use 'manual_approval' environment (requires manual approval)
     environment:
-      name: manual_approval
+      name: ${{ needs.PREPARE-job.outputs.devmode == 'true' && 'devmode_skip_approval' || 'manual_approval' }}
     env:
       IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
       VERSION: ${{ needs.PREPARE-job.outputs.version }}
