@@ -29,6 +29,7 @@ jobs:
       # - noscan: Skip security scan flag (true/false)
       # - platform: Target platform (x86/arm)
       # - targets: JSON array of target registries
+      # - private_targets: JSON array of private target registries
       # - branch_path: Directory path based on branch (e.g., "python/cuda-hpc-python")
       # - dockerfile_path: Path to Dockerfile (e.g., "python/cuda-hpc-python/Dockerfile")
       # - correlation_id: Unique ID for tracking
@@ -44,6 +45,7 @@ jobs:
       noscan: ${{ steps.validate_manifest.outputs.noscan }}
       platform: ${{ steps.validate_manifest.outputs.platform }}
       targets: ${{ steps.validate_manifest.outputs.targets }}
+      private_targets: ${{ steps.validate_manifest.outputs.private_targets }}
       branch_path: ${{ steps.validate_manifest.outputs.branch_path }}
       dockerfile_path: ${{ steps.validate_manifest.outputs.dockerfile_path }}
       correlation_id: ${{ steps.validate_manifest.outputs.correlation_id }}
@@ -255,6 +257,7 @@ jobs:
           noscan=$(jq -r '.noscan // false' "$manifest_file")
           platform=$(jq -r '.platform // "x86"' "$manifest_file")
           targets=$(jq -c '.targets // []' "$manifest_file")
+          private_targets=$(jq -c '.private-targets // []' "$manifest_file")
           correlation_id=$(jq -r '.metadata.correlation_id // empty' "$manifest_file")
           
           # Validate required fields
@@ -313,6 +316,7 @@ jobs:
           echo "No Scan: $noscan"
           echo "Platform: $platform"
           echo "Targets: $targets"
+          echo "Private Targets: $private_targets"
           echo "Correlation ID: $correlation_id"
           echo "Branch Path: $branch_path"
           echo "Dockerfile: $dockerfile_path"
@@ -327,6 +331,7 @@ jobs:
           echo "noscan=$noscan" >> $GITHUB_OUTPUT
           echo "platform=$platform" >> $GITHUB_OUTPUT
           echo "targets=$targets" >> $GITHUB_OUTPUT
+          echo "private_targets=$private_targets" >> $GITHUB_OUTPUT
           echo "branch_path=$branch_path" >> $GITHUB_OUTPUT
           echo "dockerfile_path=$dockerfile_path" >> $GITHUB_OUTPUT
           echo "correlation_id=$correlation_id" >> $GITHUB_OUTPUT
@@ -928,9 +933,18 @@ jobs:
           exit 1
         fi
         
+        # Get private targets from manifest and use the first one as username
+        private_targets='${{ needs.PREPARE-job.outputs.private_targets }}'
+        private_username=$(echo "$private_targets" | jq -r '.[0] // empty')
+        
+        if [ -z "$private_username" ] || [ "$private_username" = "null" ]; then
+          echo "Error: No private targets found in manifest"
+          exit 1
+        fi
+        
         # Tag and push
         image_tag="${IMAGE_NAME}:${VERSION}"
-        setonix_tag="setonix-registry.pawsey.org.au/${{ vars.SETONIXREG_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+        setonix_tag="setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}"
         
         echo ""
         echo "🏷️  Tagging image for Setonix Registry:"
@@ -986,13 +1000,6 @@ jobs:
         # Check each target from manifest against available credentials
         echo "$targets_array" | while read -r target; do
           case "$target" in
-            "dockerhub")
-              if [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ]; then
-                echo "[✓] Docker Hub: Will push to ${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}:${VERSION}"
-              else
-                echo "[skip] Docker Hub: Requested in manifest but credentials not available"
-              fi
-              ;;
             "quay.io")
               if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
                 echo "[✓] Quay.io: Will push to quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
@@ -1015,7 +1022,7 @@ jobs:
         echo ""
 
     - name: Configure podman environment
-      if: needs.PREPARE-job.outputs.dockerhub_available == 'true' || needs.PREPARE-job.outputs.quayio_available == 'true' || needs.PREPARE-job.outputs.setonixreg_available == 'true'
+      if: needs.PREPARE-job.outputs.quayio_available == 'true' || needs.PREPARE-job.outputs.setonixreg_available == 'true'
       run: |
         echo "Setting up container environment variables for public push..."
         
@@ -1041,7 +1048,7 @@ jobs:
 
     - name: Download archive and load to podman
       id: locate_and_load
-      if: needs.PREPARE-job.outputs.dockerhub_available == 'true' || needs.PREPARE-job.outputs.quayio_available == 'true' || needs.PREPARE-job.outputs.setonixreg_available == 'true'
+      if: needs.PREPARE-job.outputs.quayio_available == 'true' || needs.PREPARE-job.outputs.setonixreg_available == 'true'
       uses: ./.github/actions/setup-rclone
       with:
         access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
@@ -1055,56 +1062,11 @@ jobs:
         load_to_podman: true
 
     - name: Initialize Docker configuration
-      if: needs.PREPARE-job.outputs.dockerhub_available == 'true' || needs.PREPARE-job.outputs.quayio_available == 'true' || needs.PREPARE-job.outputs.setonixreg_available == 'true'
+      if: needs.PREPARE-job.outputs.quayio_available == 'true' || needs.PREPARE-job.outputs.setonixreg_available == 'true'
       run: |
         mkdir -p ~/.docker
         echo "Created Docker config directory: ~/.docker"
 
-    # ============================================
-    # Docker Hub Push (Only if in targets)
-    # ============================================
-    - name: Push to Docker Hub public registry
-      if: needs.PREPARE-job.outputs.dockerhub_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'dockerhub')
-      continue-on-error: true
-      run: |
-        set +e  # Don't exit on errors to allow independent execution
-        echo "=========================================="
-        echo " Docker Hub Push Process"
-        echo "=========================================="
-        
-        # Login to Docker Hub
-        echo "🔐 Logging into Docker Hub..."
-        if podman login docker.io -u "${{ vars.DOCKERHUB_USERNAME }}" -p "${{ secrets.DOCKERHUB_TOKEN }}"; then
-          echo "✓ Docker Hub login successful"
-        else
-          echo "✗ Docker Hub login failed"
-          exit 1
-        fi
-        
-        # Tag and push
-        image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
-        dockerhub_tag="${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}:${VERSION}"
-        
-        echo ""
-        echo "🏷️  Tagging image for Docker Hub:"
-        echo "   Source: $image_tag"
-        echo "   Target: $dockerhub_tag"
-        
-        if podman tag "$image_tag" "$dockerhub_tag"; then
-          echo "✓ Image tagged successfully"
-        else
-          echo "✗ Image tagging failed"
-          exit 1
-        fi
-        
-        echo ""
-        echo "📤 Pushing to Docker Hub..."
-        if podman push "$dockerhub_tag"; then
-          echo "✅ Successfully pushed to Docker Hub: $dockerhub_tag"
-        else
-          echo "❌ Failed to push to Docker Hub"
-          exit 1
-        fi
 
     # ============================================
     # Quay.io Push (Only if in targets)
@@ -1213,7 +1175,7 @@ jobs:
         fi
 
     - name: Clean up podman images
-      if: always() && (needs.PREPARE-job.outputs.dockerhub_available == 'true' || needs.PREPARE-job.outputs.quayio_available == 'true' || needs.PREPARE-job.outputs.setonixreg_available == 'true')
+      if: always() && (needs.PREPARE-job.outputs.quayio_available == 'true' || needs.PREPARE-job.outputs.setonixreg_available == 'true')
       run: |
         echo "🧹 Cleaning up local images..."
         image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
@@ -1223,12 +1185,6 @@ jobs:
         podman rmi "$image_tag" 2>/dev/null || echo "  (Base image already removed or not found)"
         
         # Remove tagged images based on targets
-        if [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["dockerhub"])' > /dev/null; then
-          dockerhub_tag="${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}:${VERSION}"
-          echo "Removing Docker Hub tag: $dockerhub_tag"
-          podman rmi "$dockerhub_tag" 2>/dev/null || echo "  (Docker Hub tag already removed or not found)"
-        fi
-        
         if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
           quayio_tag="quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
           echo "Removing Quay.io tag: $quayio_tag"
@@ -1246,7 +1202,7 @@ jobs:
   DEPLOY-job:
     needs: [BUILD-job, PREPARE-job, PUSH-PUBLIC-job]
     runs-on: setonix-podman02
-    if: needs.PREPARE-job.outputs.proceed_valid == 'true' && ((needs.PREPARE-job.outputs.dockerhub_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'dockerhub')) || (needs.PREPARE-job.outputs.quayio_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'quay.io')))
+    if: needs.PREPARE-job.outputs.proceed_valid == 'true' && (needs.PREPARE-job.outputs.quayio_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'quay.io'))
     env:
       IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
       VERSION: ${{ needs.PREPARE-job.outputs.version }}
@@ -1258,9 +1214,6 @@ jobs:
           echo "Configured targets: ${{ needs.PREPARE-job.outputs.targets }}"
           echo ""
           echo "Available public registries for SHPC:"
-          if [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["dockerhub"])' > /dev/null; then
-            echo "• Docker Hub: ${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}:${VERSION}"
-          fi
           if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
             echo "• Quay.io: quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
           fi
@@ -1288,20 +1241,15 @@ jobs:
         run: |
           set -euo pipefail
           
-          # Prioritize Quay.io if available and in targets, otherwise use Docker Hub
+          # Use Quay.io for deployment
           if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
             full_image="quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
             registry_url="https://quay.io/v2"
             api_path="${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}"
             registry_type="quay.io"
-          elif [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["dockerhub"])' > /dev/null; then
-            full_image="${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}:${VERSION}"
-            registry_url="https://registry-1.docker.io/v2"
-            api_path="${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}"
-            registry_type="docker.io"
           else
-            echo "Error: No compatible public registry available for deployment"
-            echo "Available registries don't match configured targets in manifest"
+            echo "Error: Quay.io registry not available for deployment"
+            echo "Quay.io must be available and in targets for SHPC deployment"
             exit 1
           fi
           
@@ -1337,11 +1285,7 @@ jobs:
           digest="${{ steps.get_image_info.outputs.digest }}"
           
           # Create registry directory structure based on the deployed image
-          if [ "$registry_type" = "quay.io" ]; then
-            shpc_path="${SHPC_REGISTRY}/quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}"
-          else
-            shpc_path="${SHPC_REGISTRY}/docker.io/${{ vars.DOCKERHUB_USERNAME }}/${IMAGE_NAME}"
-          fi
+          shpc_path="${SHPC_REGISTRY}/quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}"
           
           echo "Creating SHPC registry entry at: $shpc_path"
           
@@ -1466,26 +1410,16 @@ jobs:
             targets='${{ needs.PREPARE-job.outputs.targets }}'
             
             # Setonix Private Registry (always attempted if credentials available)
+            private_targets='${{ needs.PREPARE-job.outputs.private_targets }}'
+            private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
             if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ] && [ "${{ needs.PUSH-PRIV-job.result }}" = "success" ]; then
-              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${{ vars.SETONIXREG_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Pushed |"
+              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Pushed |"
             elif [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
-              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${{ vars.SETONIXREG_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ❌ Failed |"
+              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ❌ Failed |"
             else
-              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${{ vars.SETONIXREG_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Skipped (No credentials) |"
+              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Skipped (No credentials) |"
             fi
             
-            # Docker Hub (only if in targets)
-            if echo "$targets" | jq -e 'contains(["dockerhub"])' > /dev/null 2>&1; then
-              if [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ] && [ "${{ needs.PUSH-PUBLIC-job.result }}" = "success" ]; then
-                echo "| Docker Hub | \`docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Pushed |"
-              elif [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ]; then
-                echo "| Docker Hub | \`docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ❌ Failed |"
-              else
-                echo "| Docker Hub | \`docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Skipped (No credentials) |"
-              fi
-            else
-              echo "| Docker Hub | \`docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Not in targets |"
-            fi
             
             # Quay.io (only if in targets)
             if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1; then
@@ -1521,13 +1455,10 @@ jobs:
             
             # SHPC deployment status
             if [ "${{ needs.DEPLOY-job.result }}" = "success" ]; then
-              # Determine which registry was used for SHPC deployment
+              # Use Quay.io for SHPC deployment
               if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
                 echo "| \`/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry/quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}/\` | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Deployed |"
                 shpc_image="quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
-              elif echo "$targets" | jq -e 'contains(["dockerhub"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.dockerhub_available }}" = "true" ]; then
-                echo "| \`/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry/docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}/\` | \`docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Deployed |"
-                shpc_image="docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
               fi
               
               echo ""
@@ -1550,7 +1481,7 @@ jobs:
             elif [ "${{ needs.DEPLOY-job.result }}" = "failure" ]; then
               echo "| SHPC Registry | N/A | ❌ Deployment Failed |"
             elif [ "${{ needs.DEPLOY-job.result }}" = "skipped" ]; then
-              echo "| SHPC Registry | N/A | ⏭️ Skipped (No compatible public registry in targets) |"
+              echo "| SHPC Registry | N/A | ⏭️ Skipped (Quay.io not available or not in targets) |"
             else
               echo "| SHPC Registry | N/A | ⏸️ Not Executed |"
             fi
