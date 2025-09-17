@@ -1,9 +1,9 @@
 {
   "main": "ex3",
   "feature": "test3",
-  "version": "0.0.16",
-  "devmode": false,
-  "noscan": false,
+  "version": "0.0.21",
+  "devmode": true,
+  "noscan": true,
   "platform": "x86",
   "targets": [
     "quay.io",
@@ -18,7 +18,7 @@
     "path": "ex3/test3/"
   },
   "metadata": {
-    "timestamp": "2025-09-17T00:10:36.224974Z",
-    "correlation_id": "2fd67ad2-0e95-4e23-885f-a774639f1c26"
+    "timestamp": "2025-09-17T00:49:22.704435Z",
+    "correlation_id": "963f39cc-07b9-40a2-96f8-8e8ef9eb4f12"
   }
 }
