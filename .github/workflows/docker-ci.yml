@@ -1002,7 +1002,7 @@ jobs:
           case "$target" in
             "quay.io")
               if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
-                echo "[✓] Quay.io: Will push to quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+                echo "[✓] Quay.io: Will push to quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
               else
                 echo "[skip] Quay.io: Requested in manifest but credentials not available"
               fi
@@ -1091,7 +1091,7 @@ jobs:
         
         # Tag and push
         image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
-        quayio_tag="quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+        quayio_tag="quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
         
         echo ""
         echo "🏷️  Tagging image for Quay.io:"
@@ -1116,7 +1116,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.QUAYIO_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d '{"visibility": "public"}' \
-            "https://quay.io/api/v1/repository/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}/changevisibility")
+            "https://quay.io/api/v1/repository/pawsey/${IMAGE_NAME}/changevisibility")
           
           if echo "$visibility_response" | jq -e '.success' > /dev/null 2>&1; then
             echo "✓ Repository visibility set to public"
@@ -1186,7 +1186,7 @@ jobs:
         
         # Remove tagged images based on targets
         if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
-          quayio_tag="quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+          quayio_tag="quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
           echo "Removing Quay.io tag: $quayio_tag"
           podman rmi "$quayio_tag" 2>/dev/null || echo "  (Quay.io tag already removed or not found)"
         fi
@@ -1215,7 +1215,7 @@ jobs:
           echo ""
           echo "Available public registries for SHPC:"
           if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
-            echo "• Quay.io: quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+            echo "• Quay.io: quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
           fi
 
       - name: Load SHPC module and setup environment
@@ -1243,9 +1243,9 @@ jobs:
           
           # Use Quay.io for deployment
           if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
-            full_image="quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+            full_image="quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
             registry_url="https://quay.io/v2"
-            api_path="${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}"
+            api_path="pawsey/${IMAGE_NAME}"
             registry_type="quay.io"
           else
             echo "Error: Quay.io registry not available for deployment"
@@ -1285,7 +1285,7 @@ jobs:
           digest="${{ steps.get_image_info.outputs.digest }}"
           
           # Create registry directory structure based on the deployed image
-          shpc_path="${SHPC_REGISTRY}/quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}"
+          shpc_path="${SHPC_REGISTRY}/quay.io/pawsey/${IMAGE_NAME}"
           
           echo "Creating SHPC registry entry at: $shpc_path"
           
@@ -1424,14 +1424,14 @@ jobs:
             # Quay.io (only if in targets)
             if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1; then
               if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && [ "${{ needs.PUSH-PUBLIC-job.result }}" = "success" ]; then
-                echo "| Quay.io | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Pushed |"
+                echo "| Quay.io | \`quay.io/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Pushed |"
               elif [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
-                echo "| Quay.io | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ❌ Failed |"
+                echo "| Quay.io | \`quay.io/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ❌ Failed |"
               else
-                echo "| Quay.io | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Skipped (No credentials) |"
+                echo "| Quay.io | \`quay.io/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Skipped (No credentials) |"
               fi
             else
-              echo "| Quay.io | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Not in targets |"
+              echo "| Quay.io | \`quay.io/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Not in targets |"
             fi
             
             # Setonix Public Registry (only if in targets)
@@ -1457,8 +1457,8 @@ jobs:
             if [ "${{ needs.DEPLOY-job.result }}" = "success" ]; then
               # Use Quay.io for SHPC deployment
               if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
-                echo "| \`/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry/quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}/\` | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Deployed |"
-                shpc_image="quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
+                echo "| \`/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry/quay.io/pawsey/${{ env.IMAGE_NAME }}/\` | \`quay.io/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Deployed |"
+                shpc_image="quay.io/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
               fi
               
               echo ""
