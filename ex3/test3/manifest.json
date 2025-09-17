@@ -1,7 +1,7 @@
 {
   "main": "ex3",
   "feature": "test3",
-  "version": "0.0.23",
+  "version": "0.0.25",
   "devmode": true,
   "noscan": true,
   "platform": "x86",
@@ -10,7 +10,7 @@
     "setonix-registry"
   ],
   "private-targets": [
-    "liu268"
+    "shusen-test"
   ],
   "github": {
     "repo": "Quleaf/ImageManagerAction",
@@ -18,7 +18,7 @@
     "path": "ex3/test3/"
   },
   "metadata": {
-    "timestamp": "2025-09-17T00:49:22.704435Z",
-    "correlation_id": "963f39cc-07b9-40a2-96f8-8e8ef9eb4f12"
+    "timestamp": "2025-09-17T00:58:00.760313Z",
+    "correlation_id": "b9c4ffcc-e10a-4d77-ab8d-68b14d3de6d1"
   }
 }
