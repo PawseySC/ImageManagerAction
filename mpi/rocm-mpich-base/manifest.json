@@ -1,0 +1,23 @@
+{
+  "main": "mpi",
+  "feature": "rocm-mpich-base",
+  "version": "0.0.1",
+  "devmode": true,
+  "noscan": false,
+  "platform": "x86",
+  "targets": [
+    "setonix-registry"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-mpi/rocm-mpich-base",
+    "path": "mpi/rocm-mpich-base/"
+  },
+  "metadata": {
+    "timestamp": "2025-09-18T01:41:49.547292Z",
+    "correlation_id": "4a689d1f-c419-4cac-a352-e858145e0e48"
+  }
+}
