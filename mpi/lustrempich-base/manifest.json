@@ -1,7 +1,7 @@
 {
   "main": "mpi",
   "feature": "lustrempich-base",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "devmode": true,
   "noscan": false,
   "platform": "x86",
@@ -17,7 +17,7 @@
     "path": "mpi/lustrempich-base/"
   },
   "metadata": {
-    "timestamp": "2025-09-18T00:15:00.635041Z",
-    "correlation_id": "7cbcf2c6-8ec2-451a-bf0f-056cb409827a"
+    "timestamp": "2025-09-18T00:45:42.992078Z",
+    "correlation_id": "fcaff57b-32b3-4463-93fb-5d3f019de1fd"
   }
 }
