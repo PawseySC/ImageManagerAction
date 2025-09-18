@@ -1,0 +1,2 @@
+# Simple demo requirements
+# No external dependencies needed for this demo
