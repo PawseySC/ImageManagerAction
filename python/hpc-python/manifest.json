@@ -1,0 +1,23 @@
+{
+  "main": "python",
+  "feature": "hpc-python",
+  "version": "0.0.1",
+  "devmode": false,
+  "noscan": false,
+  "platform": "x86",
+  "targets": [
+    "setonix-registry"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-python/hpc-python",
+    "path": "python/hpc-python/"
+  },
+  "metadata": {
+    "timestamp": "2025-09-18T01:27:35.960016Z",
+    "correlation_id": "523149cc-a3d7-464a-8afa-373a7afc5024"
+  }
+}
