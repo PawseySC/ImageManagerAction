@@ -1,0 +1,23 @@
+{
+  "main": "pytorch",
+  "feature": "pytorch-base",
+  "version": "0.0.1",
+  "devmode": true,
+  "noscan": false,
+  "platform": "x86",
+  "targets": [
+    "setonix-registry"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-pytorch/pytorch-base",
+    "path": "pytorch/pytorch-base/"
+  },
+  "metadata": {
+    "timestamp": "2025-09-18T02:00:37.927008Z",
+    "correlation_id": "38b15d97-6497-4b4c-9103-4ed9475cdbca"
+  }
+}
