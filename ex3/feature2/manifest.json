@@ -1,8 +1,8 @@
 {
   "main": "ex3",
   "feature": "feature2",
-  "version": "0.0.6",
-  "devmode": false,
+  "version": "0.0.7",
+  "devmode": true,
   "noscan": false,
   "platform": "x86",
   "targets": [],
@@ -15,7 +15,7 @@
     "path": "ex3/feature2/"
   },
   "metadata": {
-    "timestamp": "2025-09-18T04:07:42.185580Z",
-    "correlation_id": "d38bb956-f971-42b1-b2d7-8eed30ff237c"
+    "timestamp": "2025-09-18T04:19:40.478107Z",
+    "correlation_id": "43adfd22-bc24-463c-a653-744b22a8622c"
   }
 }
