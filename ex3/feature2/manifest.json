@@ -1,0 +1,23 @@
+{
+  "main": "ex3",
+  "feature": "feature2",
+  "version": "0.0.1",
+  "devmode": false,
+  "noscan": false,
+  "platform": "x86",
+  "targets": [
+    "setonix-registry"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-ex3/feature2",
+    "path": "ex3/feature2/"
+  },
+  "metadata": {
+    "timestamp": "2025-09-18T00:53:41.235153Z",
+    "correlation_id": "bf29c450-6ee0-4e30-8fcf-488a908636a9"
+  }
+}
