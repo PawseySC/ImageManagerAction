@@ -1,0 +1,23 @@
+{
+  "main": "slurm",
+  "feature": "slurm-base",
+  "version": "0.0.1",
+  "devmode": false,
+  "noscan": false,
+  "platform": "x86",
+  "targets": [
+    "setonix-registry"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-slurm/slurm-base",
+    "path": "slurm/slurm-base/"
+  },
+  "metadata": {
+    "timestamp": "2025-09-22T01:38:52.106444Z",
+    "correlation_id": "2ef1ae4c-9df5-4bee-a4cf-78df74276d26"
+  }
+}
