@@ -388,8 +388,7 @@ jobs:
           echo "Building: ${{ needs.PREPARE-job.outputs.main }}/${{ needs.PREPARE-job.outputs.feature }}:${{ needs.PREPARE-job.outputs.version }}${{ matrix.variant_suffix }}"
           echo "Platform: ${{ needs.PREPARE-job.outputs.platform }}"
           echo "Correlation ID: ${{ needs.PREPARE-job.outputs.correlation_id }}"
-          echo "Variant: ${{ matrix.variant_name }}"
-          echo "Build Args: ${{ matrix.build_args }}"
+          echo "Variant: ${{ matrix.variant }}"
 
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -737,7 +736,7 @@ jobs:
           echo "Hostname: $(hostname)"
           echo "Scanning: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}${{ env.VARIANT_SUFFIX }}"
           echo "No Scan Flag: ${{ needs.PREPARE-job.outputs.noscan }}"
-          echo "Variant: ${{ matrix.variant_name }}"
+          echo "Variant: ${{ matrix.variant }}"
 
     - name: Download archive from S3
       id: locate
@@ -940,7 +939,7 @@ jobs:
       run: |
         echo "Hostname: $(hostname)"
         echo "Pushing: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}${{ env.VARIANT_SUFFIX }}"
-        echo "Variant: ${{ matrix.variant_name }}"
+        echo "Variant: ${{ matrix.variant }}"
 
     - name: Configure podman environment
       run: |
@@ -1070,7 +1069,7 @@ jobs:
       run: |
         echo "Hostname: $(hostname)"
         echo "Image: ${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
-        echo "Variant: ${{ matrix.variant_name }}"
+        echo "Variant: ${{ matrix.variant }}"
         echo "Configured Targets: $TARGETS"
         echo ""
         echo "=== Public Registry Push Plan ==="
@@ -1298,7 +1297,7 @@ jobs:
         run: |
           echo "Hostname: $(hostname)"
           echo "Starting SHPC deployment for ${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
-          echo "Variant: ${{ matrix.variant_name }}"
+          echo "Variant: ${{ matrix.variant }}"
           echo "Configured targets: ${{ needs.PREPARE-job.outputs.targets }}"
           echo ""
           echo "Available public registries for SHPC:"
@@ -1402,7 +1401,7 @@ jobs:
             main: "${{ needs.PREPARE-job.outputs.main }}"
             feature: "${{ needs.PREPARE-job.outputs.feature }}"
             platform: "${{ needs.PREPARE-job.outputs.platform }}"
-            variant: "${{ matrix.variant_name }}"
+            variant: "${{ matrix.variant }}"
             variant_suffix: "${VARIANT_SUFFIX}"
             correlation_id: "${{ needs.PREPARE-job.outputs.correlation_id }}"
             branch: "${{ github.ref_name }}"
@@ -1447,7 +1446,7 @@ jobs:
           echo "Registry path: $shpc_path"
           echo "Image: $full_image"
           echo "Version: ${VERSION}${VARIANT_SUFFIX}"
-          echo "Variant: ${{ matrix.variant_name }}"
+          echo "Variant: ${{ matrix.variant }}"
           echo "Digest: $digest"
           echo "Correlation ID: ${{ needs.PREPARE-job.outputs.correlation_id }}"
 
@@ -1497,13 +1496,15 @@ jobs:
             if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
               echo "> **Note:** This build produced ${{ env.VARIANT_COUNT }} variant(s). Each variant has separate Docker archive and SIF files."
               echo ""
-              echo "Archives are stored with variant suffix in filenames, e.g.:"
-              echo "- \`${IMAGE_NAME}_${VERSION}-<variant>.tar\`"
-              echo "- \`${IMAGE_NAME}_${VERSION}-<variant>.sif\`"
+              echo "**Docker Archives** (\`s3://${{ vars.ACACIA_BUCKETNAME }}/\`):"
+
+              # Parse matrix and list all variants
+              matrix_json='${{ needs.PREPARE-job.outputs.build_matrix }}'
+              echo "$matrix_json" | jq -r '.include[] | "- `" + "'${IMAGE_NAME}_${VERSION}'" + .variant_suffix + ".tar`"'
+
               echo ""
-              echo "**Storage Buckets:**"
-              echo "- Docker Archives: \`s3://${{ vars.ACACIA_BUCKETNAME }}/\`"
-              echo "- Singularity SIF: \`s3://${{ vars.ACACIA_SIF_BUCKETNAME }}/\`"
+              echo "**Singularity SIF Files** (\`s3://${{ vars.ACACIA_SIF_BUCKETNAME }}/\`):"
+              echo "$matrix_json" | jq -r '.include[] | "- `" + "'${IMAGE_NAME}_${VERSION}'" + .variant_suffix + ".sif`"'
             else
               echo "| Location | Address | Status |"
               echo "|----------|---------|--------|"
@@ -1528,28 +1529,37 @@ jobs:
             echo ""
 
             if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
-              echo "> **Note:** Each of the ${{ env.VARIANT_COUNT }} variant(s) has been pushed to the configured registries with their respective variant suffix."
+              echo "> **Note:** Each of the ${{ env.VARIANT_COUNT }} variant(s) has been pushed to the configured registries."
               echo ""
-              echo "**Configured Registries:**"
 
               # Parse configured targets
               targets='${{ needs.PREPARE-job.outputs.targets }}'
               private_targets='${{ needs.PREPARE-job.outputs.private_targets }}'
               private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
+              matrix_json='${{ needs.PREPARE-job.outputs.build_matrix }}'
 
               # Setonix Private Registry
               if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
-                echo "- **Setonix Private:** \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}-<variant>\`"
+                echo "### Setonix Private Registry"
+                echo ""
+                echo "$matrix_json" | jq -r '.include[] | "- `setonix-registry.pawsey.org.au/'${private_username}'/'${IMAGE_NAME}':'${VERSION}'" + .variant_suffix + "`"'
+                echo ""
               fi
 
               # Quay.io
               if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
-                echo "- **Quay.io:** \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}-<variant>\`"
+                echo "### Quay.io Public Registry"
+                echo ""
+                echo "$matrix_json" | jq -r '.include[] | "- `quay.io/pawsey/'${IMAGE_NAME}':'${VERSION}'" + .variant_suffix + "`"'
+                echo ""
               fi
 
               # Setonix Public
               if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
-                echo "- **Setonix Public:** \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}-<variant>\`"
+                echo "### Setonix Public Registry"
+                echo ""
+                echo "$matrix_json" | jq -r '.include[] | "- `setonix-registry.pawsey.org.au/pawsey/'${IMAGE_NAME}':'${VERSION}'" + .variant_suffix + "`"'
+                echo ""
               fi
             else
               echo "| Registry | Address | Status |"
@@ -1611,7 +1621,9 @@ jobs:
                   echo ""
                   echo "**SHPC Registry Path:** \`/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry/quay.io/pawsey/${IMAGE_NAME}/\`"
                   echo ""
-                  echo "**Image Source:** \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}-<variant>\`"
+                  echo "**Available Variants:**"
+                  matrix_json='${{ needs.PREPARE-job.outputs.build_matrix }}'
+                  echo "$matrix_json" | jq -r '.include[] | "- `quay.io/pawsey/'${IMAGE_NAME}':'${VERSION}'" + .variant_suffix + "`"'
                   echo ""
                   echo "### SHPC Usage Commands"
                   echo ""
@@ -1623,11 +1635,12 @@ jobs:
                   echo "# List available variants"
                   echo "shpc show quay.io/pawsey/${IMAGE_NAME}"
                   echo ""
-                  echo "# Install a specific variant (replace <variant> with actual variant name)"
-                  echo "shpc install quay.io/pawsey/${IMAGE_NAME}:${VERSION}-<variant>"
+                  echo "# Install a specific variant (example with first variant)"
+                  first_variant=$(echo "$matrix_json" | jq -r '.include[0].variant_suffix')
+                  echo "shpc install quay.io/pawsey/${IMAGE_NAME}:${VERSION}${first_variant}"
                   echo ""
                   echo "# Use the container"
-                  echo "shpc run quay.io/pawsey/${IMAGE_NAME}:${VERSION}-<variant> <command>"
+                  echo "shpc run quay.io/pawsey/${IMAGE_NAME}:${VERSION}${first_variant} <command>"
                   echo "\`\`\`"
                 else
                   shpc_image="quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
