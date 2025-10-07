@@ -5,6 +5,13 @@
   "devmode": true,
   "noscan": true,
   "platform": "x86",
+  "template": {
+    "DEBIAN_VERSION": [
+      "stretch",
+      "buster"
+    ],
+    "CURL_ENABLED": "yes"
+  },
   "targets": [
     "quay.io",
     "setonix-registry"
