@@ -37,7 +37,7 @@ runs:
           echo "No template field found in manifest.json"
           echo "has_template=false" >> $GITHUB_OUTPUT
           echo "variant_count=1" >> $GITHUB_OUTPUT
-          echo "matrix={\"include\":[{\"variant\":\"default\",\"variant_suffix\":\"\",\"template_values\":{}}]}" >> $GITHUB_OUTPUT
+          echo "matrix={\"include\":[{\"index\":1,\"values\":{}}]}" >> $GITHUB_OUTPUT
           exit 0
         fi
 
@@ -109,34 +109,14 @@ runs:
         echo "Combinations:"
         echo "$combinations" | jq '.'
 
-        # Step 3: Generate matrix configuration with variant names and build_args
-        # Use 'variant' as the primary matrix dimension for cleaner GitHub Actions UI
+        # Step 3: Generate matrix configuration
+        # Use simple index for clean GitHub Actions UI display
         matrix_json=$(echo "$combinations" | jq -c '[
+          to_entries |
           .[] |
           {
-            variant: (
-              to_entries |
-              map(
-                if (.value | type) == "array" then
-                  .key + "-" + (.value | join("-"))
-                else
-                  .key + "-" + .value
-                end
-              ) |
-              join("-")
-            ),
-            variant_suffix: (
-              to_entries |
-              map(
-                if (.value | type) == "array" then
-                  "-" + .key + "-" + (.value | join("-"))
-                else
-                  "-" + .key + "-" + .value
-                end
-              ) |
-              join("")
-            ),
-            template_values: .
+            index: (.key + 1),
+            values: .value
           }
         ] | {include: .}')
 

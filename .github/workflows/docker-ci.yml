@@ -380,20 +380,44 @@ jobs:
     outputs:
       image_tag: ${{ steps.build_container.outputs.image_tag }}
       image_name: ${{ steps.build_container.outputs.image_name }}
-      variant_suffix: ${{ matrix.variant_suffix }}
     steps:
-      - name: Display build environment
-        run: |
-          echo "Hostname: $(hostname)"
-          echo "Building: ${{ needs.PREPARE-job.outputs.main }}/${{ needs.PREPARE-job.outputs.feature }}:${{ needs.PREPARE-job.outputs.version }}${{ matrix.variant_suffix }}"
-          echo "Platform: ${{ needs.PREPARE-job.outputs.platform }}"
-          echo "Correlation ID: ${{ needs.PREPARE-job.outputs.correlation_id }}"
-          echo "Variant: ${{ matrix.variant }}"
-
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Compute variant suffix and display build info
+        id: compute_variant
+        run: |
+          set -euo pipefail
+
+          # Get template values from matrix
+          template_values='${{ toJson(matrix.values) }}'
+          variant_index="${{ matrix.index }}"
+
+          # Compute variant name and suffix from template values
+          if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+            # Generate variant name from template values
+            variant_name=$(echo "$template_values" | jq -r 'to_entries | map(.key + "-" + .value) | join("-")')
+            variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+          else
+            variant_name="default"
+            variant_suffix=""
+          fi
+
+          echo "=========================================="
+          echo "Build Environment"
+          echo "=========================================="
+          echo "Hostname: $(hostname)"
+          echo "Building: ${{ needs.PREPARE-job.outputs.main }}/${{ needs.PREPARE-job.outputs.feature }}:${{ needs.PREPARE-job.outputs.version }}${variant_suffix}"
+          echo "Platform: ${{ needs.PREPARE-job.outputs.platform }}"
+          echo "Correlation ID: ${{ needs.PREPARE-job.outputs.correlation_id }}"
+          echo "Variant #${variant_index}: $variant_name"
+          echo "=========================================="
+
+          # Export for use in subsequent steps
+          echo "VARIANT_SUFFIX=$variant_suffix" >> $GITHUB_ENV
+          echo "VARIANT_NAME=$variant_name" >> $GITHUB_ENV
 
       - name: Apply template values to Dockerfile
         if: needs.PREPARE-job.outputs.has_template == 'true'
@@ -401,16 +425,16 @@ jobs:
           set -euo pipefail
 
           dockerfile="${{ needs.PREPARE-job.outputs.dockerfile_path }}"
+          template_values='${{ toJson(matrix.values) }}'
+
           echo "Processing Dockerfile: $dockerfile"
-          echo "Template values: ${{ toJson(matrix.template_values) }}"
+          echo "Template values: $template_values"
 
           # Create a backup of original Dockerfile
           cp "$dockerfile" "$dockerfile.original"
 
           # Parse template values and modify ARG lines in Dockerfile
-          template_json='${{ toJson(matrix.template_values) }}'
-
-          echo "$template_json" | jq -r 'to_entries[] | "\(.key)=\(.value)"' | while IFS='=' read -r arg_name arg_value; do
+          echo "$template_values" | jq -r 'to_entries[] | "\(.key)=\(.value)"' | while IFS='=' read -r arg_name arg_value; do
             echo "Replacing ARG $arg_name with value: $arg_value"
 
             # Use sed to replace ARG lines
@@ -531,12 +555,11 @@ jobs:
           main="${{ needs.PREPARE-job.outputs.main }}"
           feature="${{ needs.PREPARE-job.outputs.feature }}"
           version="${{ needs.PREPARE-job.outputs.version }}"
-          variant_suffix="${{ matrix.variant_suffix }}"
 
           # Create image name from main and feature
           image_name="${main}-${feature}"
-          # Add variant suffix to version if template is present
-          image_tag="${image_name}:${version}${variant_suffix}"
+          # Add variant suffix to version (VARIANT_SUFFIX is set in previous step)
+          image_tag="${image_name}:${version}${VARIANT_SUFFIX}"
           
           # Set up cache tracking (Podman uses native layer caching)
           IMAGE_CACHE_REF="${main}-${feature}:cache"
@@ -601,10 +624,9 @@ jobs:
           image_tag="${{ steps.build_container.outputs.image_tag }}"
           image_name="${{ steps.build_container.outputs.image_name }}"
           version="${{ needs.PREPARE-job.outputs.version }}"
-          variant_suffix="${{ matrix.variant_suffix }}"
 
-          # Define output file with variant suffix
-          output_file="${image_name}_${version}${variant_suffix}.tar"
+          # Define output file with variant suffix (VARIANT_SUFFIX from env)
+          output_file="${image_name}_${version}${VARIANT_SUFFIX}.tar"
           
           echo "Saving container to Docker archive..."
           echo "Image: $image_tag"
@@ -728,15 +750,25 @@ jobs:
     env:
       IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
       VERSION: ${{ needs.PREPARE-job.outputs.version }}
-      VARIANT_SUFFIX: ${{ matrix.variant_suffix }}
       REPORT_DIR: ./trivy-reports
     steps:
+    - name: Compute variant info
+      run: |
+        # Compute VARIANT_SUFFIX from matrix.values
+        template_values='${{ toJson(matrix.values) }}'
+        if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+        else
+          variant_suffix=""
+        fi
+        echo "VARIANT_SUFFIX=$variant_suffix" >> $GITHUB_ENV
+
     - name: Display scan environment
       run: |
           echo "Hostname: $(hostname)"
-          echo "Scanning: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}${{ env.VARIANT_SUFFIX }}"
+          echo "Scanning: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}${VARIANT_SUFFIX}"
           echo "No Scan Flag: ${{ needs.PREPARE-job.outputs.noscan }}"
-          echo "Variant: ${{ matrix.variant }}"
+          echo "Variant #${{ matrix.index }}"
 
     - name: Download archive from S3
       id: locate
@@ -932,14 +964,24 @@ jobs:
     env:
       IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
       VERSION: ${{ needs.PREPARE-job.outputs.version }}
-      VARIANT_SUFFIX: ${{ matrix.variant_suffix }}
       BUCKET: ${{ vars.ACACIA_BUCKETNAME }}
     steps:
+    - name: Compute variant info
+      run: |
+        # Compute VARIANT_SUFFIX from matrix.values
+        template_values='${{ toJson(matrix.values) }}'
+        if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+        else
+          variant_suffix=""
+        fi
+        echo "VARIANT_SUFFIX=$variant_suffix" >> $GITHUB_ENV
+
     - name: Display registry environment
       run: |
         echo "Hostname: $(hostname)"
-        echo "Pushing: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}${{ env.VARIANT_SUFFIX }}"
-        echo "Variant: ${{ matrix.variant }}"
+        echo "Pushing: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}${VARIANT_SUFFIX}"
+        echo "Variant #${{ matrix.index }}"
 
     - name: Configure podman environment
       run: |
@@ -1062,14 +1104,24 @@ jobs:
     env:
       IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
       VERSION: ${{ needs.PREPARE-job.outputs.version }}
-      VARIANT_SUFFIX: ${{ matrix.variant_suffix }}
       TARGETS: ${{ needs.PREPARE-job.outputs.targets }}
     steps:
+    - name: Compute variant info
+      run: |
+        # Compute VARIANT_SUFFIX from matrix.values
+        template_values='${{ toJson(matrix.values) }}'
+        if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+        else
+          variant_suffix=""
+        fi
+        echo "VARIANT_SUFFIX=$variant_suffix" >> $GITHUB_ENV
+
     - name: Display public registry push plan
       run: |
         echo "Hostname: $(hostname)"
         echo "Image: ${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
-        echo "Variant: ${{ matrix.variant }}"
+        echo "Variant #${{ matrix.index }}"
         echo "Configured Targets: $TARGETS"
         echo ""
         echo "=== Public Registry Push Plan ==="
@@ -1291,13 +1343,23 @@ jobs:
     env:
       IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
       VERSION: ${{ needs.PREPARE-job.outputs.version }}
-      VARIANT_SUFFIX: ${{ matrix.variant_suffix }}
     steps:
+      - name: Compute variant info
+        run: |
+          # Compute VARIANT_SUFFIX from matrix.values
+          template_values='${{ toJson(matrix.values) }}'
+          if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+            variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+          else
+            variant_suffix=""
+          fi
+          echo "VARIANT_SUFFIX=$variant_suffix" >> $GITHUB_ENV
+
       - name: Display deployment environment
         run: |
           echo "Hostname: $(hostname)"
           echo "Starting SHPC deployment for ${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
-          echo "Variant: ${{ matrix.variant }}"
+          echo "Variant #${{ matrix.index }}"
           echo "Configured targets: ${{ needs.PREPARE-job.outputs.targets }}"
           echo ""
           echo "Available public registries for SHPC:"
@@ -1401,7 +1463,7 @@ jobs:
             main: "${{ needs.PREPARE-job.outputs.main }}"
             feature: "${{ needs.PREPARE-job.outputs.feature }}"
             platform: "${{ needs.PREPARE-job.outputs.platform }}"
-            variant: "${{ matrix.variant }}"
+            variant_index: ${{ matrix.index }}
             variant_suffix: "${VARIANT_SUFFIX}"
             correlation_id: "${{ needs.PREPARE-job.outputs.correlation_id }}"
             branch: "${{ github.ref_name }}"
@@ -1446,7 +1508,7 @@ jobs:
           echo "Registry path: $shpc_path"
           echo "Image: $full_image"
           echo "Version: ${VERSION}${VARIANT_SUFFIX}"
-          echo "Variant: ${{ matrix.variant }}"
+          echo "Variant #${{ matrix.index }}"
           echo "Digest: $digest"
           echo "Correlation ID: ${{ needs.PREPARE-job.outputs.correlation_id }}"
 
