@@ -1,5 +1,9 @@
+# Template parameters
+ARG DEBIAN_VERSION=stretch
+ARG CURL_ENABLED=no
+
 # use node:10
-FROM debian:stretch
+FROM debian:${DEBIAN_VERSION}
 
 # install some common tools (these packages have many vulnerabilities in node:10)
 RUN set -eux; \
