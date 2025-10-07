@@ -1,6 +1,8 @@
 # use node:10
 FROM debian:stretch
 
+ARG Var1=key1
+ARG Var2=key2
 # install some common tools (these packages have many vulnerabilities in node:10)
 RUN set -eux; \
     sed -i 's|deb.debian.org/debian|archive.debian.org/debian|g' /etc/apt/sources.list; \
@@ -12,4 +14,4 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 # default command
 CMD ["node", "-v"]
-LABEL org.opencontainers.image.version=0.0.8 org.opencontainers.image.devmode=false org.opencontainers.image.noscan=false org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.6 org.opencontainers.image.devmode=false org.opencontainers.image.noscan=false org.opencontainers.image.platform=x86
