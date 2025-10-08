@@ -402,9 +402,9 @@ jobs:
 
           # Compute variant name and suffix from template values
           if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
-            # Generate variant name from template values
-            variant_name=$(echo "$template_values" | jq -r 'to_entries | map(.key + "-" + .value) | join("-")')
-            variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+            # Generate variant name from template values (lowercase for container compatibility)
+            variant_name=$(echo "$template_values" | jq -r 'to_entries | map(.key + "-" + .value) | join("-")' | tr '[:upper:]' '[:lower:]')
+            variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")' | tr '[:upper:]' '[:lower:]')
           else
             variant_name="default"
             variant_suffix=""
@@ -761,10 +761,10 @@ jobs:
     steps:
     - name: Compute variant info
       run: |
-        # Compute VARIANT_SUFFIX from matrix.values
+        # Compute VARIANT_SUFFIX from matrix.values (lowercase for container compatibility)
         template_values='${{ toJson(matrix.values) }}'
         if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
-          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")' | tr '[:upper:]' '[:lower:]')
         else
           variant_suffix=""
         fi
@@ -982,10 +982,10 @@ jobs:
     steps:
     - name: Compute variant info
       run: |
-        # Compute VARIANT_SUFFIX from matrix.values
+        # Compute VARIANT_SUFFIX from matrix.values (lowercase for container compatibility)
         template_values='${{ toJson(matrix.values) }}'
         if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
-          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")' | tr '[:upper:]' '[:lower:]')
         else
           variant_suffix=""
         fi
@@ -1127,10 +1127,10 @@ jobs:
     steps:
     - name: Compute variant info
       run: |
-        # Compute VARIANT_SUFFIX from matrix.values
+        # Compute VARIANT_SUFFIX from matrix.values (lowercase for container compatibility)
         template_values='${{ toJson(matrix.values) }}'
         if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
-          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")' | tr '[:upper:]' '[:lower:]')
         else
           variant_suffix=""
         fi
@@ -1370,10 +1370,10 @@ jobs:
     steps:
       - name: Compute variant info
         run: |
-          # Compute VARIANT_SUFFIX from matrix.values
+          # Compute VARIANT_SUFFIX from matrix.values (lowercase for container compatibility)
           template_values='${{ toJson(matrix.values) }}'
           if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
-            variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+            variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")' | tr '[:upper:]' '[:lower:]')
           else
             variant_suffix=""
           fi
@@ -1584,12 +1584,12 @@ jobs:
               echo ""
               echo "**Docker Archives** (\`s3://${{ vars.ACACIA_BUCKETNAME }}/\`):"
 
-              # Parse matrix and compute variant_suffix for each variant
+              # Parse matrix and compute variant_suffix for each variant (lowercase for container compatibility)
               matrix_json='${{ needs.PREPARE-job.outputs.build_matrix }}'
               echo "$matrix_json" | jq -r '.include[] |
                 .values |
                 to_entries |
-                map("-" + .key + "-" + .value) |
+                map("-" + .key + "-" + (.value | ascii_downcase)) |
                 join("") as $suffix |
                 "- `'${IMAGE_NAME}'" + $suffix + "_${VERSION}.tar`"'
 
@@ -1598,7 +1598,7 @@ jobs:
               echo "$matrix_json" | jq -r '.include[] |
                 .values |
                 to_entries |
-                map("-" + .key + "-" + .value) |
+                map("-" + .key + "-" + (.value | ascii_downcase)) |
                 join("") as $suffix |
                 "- `'${IMAGE_NAME}'" + $suffix + "_${VERSION}.sif`"'
             else
@@ -1641,7 +1641,7 @@ jobs:
                 echo "$matrix_json" | jq -r '.include[] |
                   .values |
                   to_entries |
-                  map("-" + .key + "-" + .value) |
+                  map("-" + .key + "-" + (.value | ascii_downcase)) |
                   join("") as $suffix |
                   "- `setonix-registry.pawsey.org.au/'${private_username}'/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
                 echo ""
@@ -1654,7 +1654,7 @@ jobs:
                 echo "$matrix_json" | jq -r '.include[] |
                   .values |
                   to_entries |
-                  map("-" + .key + "-" + .value) |
+                  map("-" + .key + "-" + (.value | ascii_downcase)) |
                   join("") as $suffix |
                   "- `quay.io/pawsey/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
                 echo ""
@@ -1667,7 +1667,7 @@ jobs:
                 echo "$matrix_json" | jq -r '.include[] |
                   .values |
                   to_entries |
-                  map("-" + .key + "-" + .value) |
+                  map("-" + .key + "-" + (.value | ascii_downcase)) |
                   join("") as $suffix |
                   "- `setonix-registry.pawsey.org.au/pawsey/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
                 echo ""
@@ -1737,7 +1737,7 @@ jobs:
                   echo "$matrix_json" | jq -r '.include[] |
                     .values |
                     to_entries |
-                    map("-" + .key + "-" + .value) |
+                    map("-" + .key + "-" + (.value | ascii_downcase)) |
                     join("") as $suffix |
                     "- `quay.io/pawsey/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
                   echo ""
@@ -1749,7 +1749,7 @@ jobs:
                   echo "module load shpc/0.1.32"
                   echo ""
                   echo "# List available variants"
-                  first_variant=$(echo "$matrix_json" | jq -r '.include[0].values | to_entries | map("-" + .key + "-" + .value) | join("")')
+                  first_variant=$(echo "$matrix_json" | jq -r '.include[0].values | to_entries | map("-" + .key + "-" + (.value | ascii_downcase)) | join("")')
                   first_variant_name="${IMAGE_NAME}${first_variant}"
                   echo "shpc show quay.io/pawsey/${first_variant_name}"
                   echo ""
