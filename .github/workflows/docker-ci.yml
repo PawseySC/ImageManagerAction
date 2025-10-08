@@ -265,7 +265,7 @@ jobs:
           devmode=$(jq -r '.devmode // false' "$manifest_file")
           noscan=$(jq -r '.noscan // false' "$manifest_file")
           platform=$(jq -r '.platform // "x86"' "$manifest_file")
-          shpc=$(jq -r '.shpc // true' "$manifest_file")
+          shpc=$(jq -r '.shpc // false' "$manifest_file")
           targets=$(jq -c '.targets // []' "$manifest_file")
           private_targets=$(jq -c '."private-targets" // []' "$manifest_file")
           correlation_id=$(jq -r '.metadata.correlation_id // empty' "$manifest_file")
@@ -1619,7 +1619,12 @@ jobs:
               if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
                 echo "### Setonix Private Registry"
                 echo ""
-                echo "$matrix_json" | jq -r '.include[] | "- `setonix-registry.pawsey.org.au/'${private_username}'/'${IMAGE_NAME}':'${VERSION}'" + .variant_suffix + "`"'
+                echo "$matrix_json" | jq -r '.include[] |
+                  .values |
+                  to_entries |
+                  map("-" + .key + "-" + .value) |
+                  join("") as $suffix |
+                  "- `setonix-registry.pawsey.org.au/'${private_username}'/'${IMAGE_NAME}':'${VERSION}'" + $suffix + "`"'
                 echo ""
               fi
 
@@ -1627,7 +1632,12 @@ jobs:
               if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
                 echo "### Quay.io Public Registry"
                 echo ""
-                echo "$matrix_json" | jq -r '.include[] | "- `quay.io/pawsey/'${IMAGE_NAME}':'${VERSION}'" + .variant_suffix + "`"'
+                echo "$matrix_json" | jq -r '.include[] |
+                  .values |
+                  to_entries |
+                  map("-" + .key + "-" + .value) |
+                  join("") as $suffix |
+                  "- `quay.io/pawsey/'${IMAGE_NAME}':'${VERSION}'" + $suffix + "`"'
                 echo ""
               fi
 
@@ -1635,7 +1645,12 @@ jobs:
               if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
                 echo "### Setonix Public Registry"
                 echo ""
-                echo "$matrix_json" | jq -r '.include[] | "- `setonix-registry.pawsey.org.au/pawsey/'${IMAGE_NAME}':'${VERSION}'" + .variant_suffix + "`"'
+                echo "$matrix_json" | jq -r '.include[] |
+                  .values |
+                  to_entries |
+                  map("-" + .key + "-" + .value) |
+                  join("") as $suffix |
+                  "- `setonix-registry.pawsey.org.au/pawsey/'${IMAGE_NAME}':'${VERSION}'" + $suffix + "`"'
                 echo ""
               fi
             else
@@ -1700,7 +1715,12 @@ jobs:
                   echo ""
                   echo "**Available Variants:**"
                   matrix_json='${{ needs.PREPARE-job.outputs.build_matrix }}'
-                  echo "$matrix_json" | jq -r '.include[] | "- `quay.io/pawsey/'${IMAGE_NAME}':'${VERSION}'" + .variant_suffix + "`"'
+                  echo "$matrix_json" | jq -r '.include[] |
+                    .values |
+                    to_entries |
+                    map("-" + .key + "-" + .value) |
+                    join("") as $suffix |
+                    "- `quay.io/pawsey/'${IMAGE_NAME}':'${VERSION}'" + $suffix + "`"'
                   echo ""
                   echo "### SHPC Usage Commands"
                   echo ""
@@ -1713,7 +1733,7 @@ jobs:
                   echo "shpc show quay.io/pawsey/${IMAGE_NAME}"
                   echo ""
                   echo "# Install a specific variant (example with first variant)"
-                  first_variant=$(echo "$matrix_json" | jq -r '.include[0].variant_suffix')
+                  first_variant=$(echo "$matrix_json" | jq -r '.include[0].values | to_entries | map("-" + .key + "-" + .value) | join("")')
                   echo "shpc install quay.io/pawsey/${IMAGE_NAME}:${VERSION}${first_variant}"
                   echo ""
                   echo "# Use the container"

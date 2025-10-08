@@ -2,9 +2,10 @@
   "main": "ex3",
   "feature": "test3",
   "version": "0.0.10",
-  "devmode": true,
+  "devmode": false,
   "noscan": true,
   "platform": "x86",
+  "shpc": false,
   "template": {
     "DEBIAN_VERSION": [
       "stretch",
@@ -12,10 +13,7 @@
     ],
     "CURL_ENABLED": "yes"
   },
-  "targets": [
-    "quay.io",
-    "setonix-registry"
-  ],
+  "targets": [],
   "private-targets": [
     "liu268"
   ],
