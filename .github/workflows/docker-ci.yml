@@ -28,6 +28,7 @@ jobs:
       # - devmode: Development mode flag (true/false)
       # - noscan: Skip security scan flag (true/false)
       # - platform: Target platform (x86/arm)
+      # - shpc: SHPC deployment flag (true/false)
       # - targets: JSON array of target registries
       # - private_targets: JSON array of private target registries
       # - branch_path: Directory path based on branch (e.g., "python/cuda-hpc-python")
@@ -48,6 +49,7 @@ jobs:
       devmode: ${{ steps.validate_manifest.outputs.devmode }}
       noscan: ${{ steps.validate_manifest.outputs.noscan }}
       platform: ${{ steps.validate_manifest.outputs.platform }}
+      shpc: ${{ steps.validate_manifest.outputs.shpc }}
       targets: ${{ steps.validate_manifest.outputs.targets }}
       private_targets: ${{ steps.validate_manifest.outputs.private_targets }}
       branch_path: ${{ steps.validate_manifest.outputs.branch_path }}
@@ -263,6 +265,7 @@ jobs:
           devmode=$(jq -r '.devmode // false' "$manifest_file")
           noscan=$(jq -r '.noscan // false' "$manifest_file")
           platform=$(jq -r '.platform // "x86"' "$manifest_file")
+          shpc=$(jq -r '.shpc // true' "$manifest_file")
           targets=$(jq -c '.targets // []' "$manifest_file")
           private_targets=$(jq -c '."private-targets" // []' "$manifest_file")
           correlation_id=$(jq -r '.metadata.correlation_id // empty' "$manifest_file")
@@ -322,13 +325,14 @@ jobs:
           echo "Dev Mode: $devmode"
           echo "No Scan: $noscan"
           echo "Platform: $platform"
+          echo "SHPC Deploy: $shpc"
           echo "Targets: $targets"
           echo "Private Targets: $private_targets"
           echo "Correlation ID: $correlation_id"
           echo "Branch Path: $branch_path"
           echo "Dockerfile: $dockerfile_path"
           echo "============================"
-          
+
           # Set outputs
           echo "proceed_valid=true" >> $GITHUB_OUTPUT
           echo "main=$main" >> $GITHUB_OUTPUT
@@ -337,6 +341,7 @@ jobs:
           echo "devmode=$devmode" >> $GITHUB_OUTPUT
           echo "noscan=$noscan" >> $GITHUB_OUTPUT
           echo "platform=$platform" >> $GITHUB_OUTPUT
+          echo "shpc=$shpc" >> $GITHUB_OUTPUT
           echo "targets=$targets" >> $GITHUB_OUTPUT
           echo "private_targets=$private_targets" >> $GITHUB_OUTPUT
           echo "branch_path=$branch_path" >> $GITHUB_OUTPUT
@@ -950,7 +955,7 @@ jobs:
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: trivy-reports-${{ env.IMAGE_NAME }}-${{ env.VERSION }}
+        name: trivy-reports-${{ env.IMAGE_NAME }}-${{ env.VERSION }}${{ env.VARIANT_SUFFIX }}
         path: ${{ env.REPORT_DIR }}/
         retention-days: 30
 
@@ -1096,11 +1101,11 @@ jobs:
     strategy:
       matrix: ${{ fromJson(needs.PREPARE-job.outputs.build_matrix) }}
       fail-fast: false
-    # Environment selection based on devmode flag:
-    # - If devmode=true: Use 'devmode_skip_approval' environment (no manual approval required)
-    # - If devmode=false: Use 'manual_approval' environment (requires manual approval)
+    # Environment selection based on devmode flag and targets:
+    # - If devmode=true OR targets is empty: Use 'devmode_skip_approval' environment (no manual approval required)
+    # - If devmode=false AND targets has values: Use 'manual_approval' environment (requires manual approval)
     environment:
-      name: ${{ needs.PREPARE-job.outputs.devmode == 'true' && 'devmode_skip_approval' || 'manual_approval' }}
+      name: ${{ (needs.PREPARE-job.outputs.devmode == 'true' || needs.PREPARE-job.outputs.targets == '[]') && 'devmode_skip_approval' || 'manual_approval' }}
     env:
       IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
       VERSION: ${{ needs.PREPARE-job.outputs.version }}
@@ -1336,7 +1341,7 @@ jobs:
   DEPLOY-job:
     needs: [BUILD-job, PREPARE-job, PUSH-PUBLIC-job]
     runs-on: setonix-podman02
-    if: needs.PREPARE-job.outputs.proceed_valid == 'true' && (needs.PREPARE-job.outputs.quayio_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'quay.io'))
+    if: needs.PREPARE-job.outputs.proceed_valid == 'true' && needs.PREPARE-job.outputs.shpc == 'true' && (needs.PREPARE-job.outputs.quayio_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'quay.io'))
     strategy:
       matrix: ${{ fromJson(needs.PREPARE-job.outputs.build_matrix) }}
       fail-fast: false
@@ -1741,7 +1746,7 @@ jobs:
             elif [ "${{ needs.DEPLOY-job.result }}" = "failure" ]; then
               echo "| SHPC Registry | N/A | ❌ Deployment Failed |"
             elif [ "${{ needs.DEPLOY-job.result }}" = "skipped" ]; then
-              echo "| SHPC Registry | N/A | ⏭️ Skipped (Quay.io not available or not in targets) |"
+              echo "| SHPC Registry | N/A | ⏭️ Skipped (shpc=false or Quay.io not available or not in targets) |"
             else
               echo "| SHPC Registry | N/A | ⏸️ Not Executed |"
             fi
