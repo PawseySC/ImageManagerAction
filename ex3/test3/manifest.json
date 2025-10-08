@@ -3,9 +3,9 @@
   "feature": "test3",
   "version": "0.0.10",
   "devmode": false,
-  "noscan": true,
+  "noscan": false,
   "platform": "x86",
-  "shpc": false,
+  "shpc": true,
   "template": {
     "DEBIAN_VERSION": [
       "stretch",
@@ -13,7 +13,9 @@
     ],
     "CURL_ENABLED": "yes"
   },
-  "targets": [],
+  "targets": [
+    "quay.io"
+  ],
   "private-targets": [
     "liu268"
   ],
