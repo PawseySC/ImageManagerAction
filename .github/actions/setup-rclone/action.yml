@@ -107,9 +107,13 @@ runs:
         set -euo pipefail
         # Load rclone module
         module load rclone/1.68.1
-        # Store configuration in project-local directory
-        mkdir -p ./.rclone_config
-        tee ./.rclone_config/rclone.conf > /dev/null <<EOF
+
+        # Use unique config directory per job to avoid conflicts in matrix builds
+        # Include PID and random suffix for uniqueness
+        CONFIG_DIR="./.rclone_config_$$_${RANDOM}"
+        mkdir -p "$CONFIG_DIR"
+
+        tee "$CONFIG_DIR/rclone.conf" > /dev/null <<EOF
         [pawsey0012]
         type = s3
         provider = Ceph
@@ -117,8 +121,12 @@ runs:
         access_key_id = ${{ inputs.access_key_id }}
         secret_access_key = ${{ inputs.secret_access_key }}
         EOF
+
         # Export environment variable so rclone automatically picks up this config
-        echo "RCLONE_CONFIG=$(pwd)/.rclone_config/rclone.conf" >> $GITHUB_ENV
+        echo "RCLONE_CONFIG=$(pwd)/$CONFIG_DIR/rclone.conf" >> $GITHUB_ENV
+        echo "RCLONE_CONFIG_DIR=$CONFIG_DIR" >> $GITHUB_ENV
+
+        echo "Created unique rclone config at: $CONFIG_DIR"
 
     - name: Verify rclone Configuration
       shell: bash
@@ -199,16 +207,17 @@ runs:
         # Test 6: Test bucket write permissions with a small test file
         echo ""
         echo "6. Testing bucket write permissions..."
-        test_file="rclone_test_$(date +%s).tmp"
+        # Use unique test file name to avoid conflicts in concurrent scenarios
+        test_file="rclone_test_$$_${RANDOM}_$(date +%s).tmp"
         echo "test_content_$(date)" > "$test_file"
-        
-        if timeout 15 rclone copy "$test_file" pawsey0012:"$bucket/" 2>/dev/null; then
+
+        if timeout 15 rclone copy "$test_file" pawsey0012:"$bucket/" --no-traverse 2>/dev/null; then
           echo "  ✓ Write permissions confirmed"
           # Clean up test file from S3
-          if timeout 10 rclone delete pawsey0012:"$bucket/$test_file" 2>/dev/null; then
+          if timeout 10 rclone delete pawsey0012:"$bucket/$test_file" --no-traverse 2>/dev/null; then
             echo "  ✓ Delete permissions confirmed"
           else
-            echo "  ⚠ Could upload but not delete test file"
+            echo "  ⚠ Could upload but not delete test file (non-critical)"
           fi
         else
           echo "  ✗ No write permissions to bucket"
@@ -218,7 +227,7 @@ runs:
           echo "    - s3:PutObjectAcl (might be required)"
           echo "    - s3:GetObject (for verification)"
         fi
-        
+
         # Clean up local test file
         rm -f "$test_file"
         
@@ -262,9 +271,14 @@ runs:
         echo "Downloading archive from S3..."
         echo "Bucket: $bucket"
         echo "Archive: $archive_file"
-        
+
         # Download from S3
-        if rclone copy pawsey0012:"$bucket/$archive_file" ./ --progress; then
+        # Add --no-traverse and retries for better reliability in concurrent scenarios
+        if rclone copy pawsey0012:"$bucket/$archive_file" ./ \
+          --no-traverse \
+          --retries 3 \
+          --low-level-retries 10 \
+          --progress; then
           if [ -f "./$archive_file" ]; then
             file_size=$(ls -lh "./$archive_file" | awk '{print $5}')
             echo "✓ Archive downloaded successfully from S3"
@@ -383,10 +397,15 @@ runs:
         echo "  Multi-thread streams: $MULTI_THREAD_STREAMS"
         
         # Upload to S3
+        # Add --no-traverse to avoid directory scanning issues in concurrent scenarios
+        # Add --retries for resilience
         if rclone copy "$upload_file" pawsey0012:"$bucket/" \
           --multi-thread-streams=$MULTI_THREAD_STREAMS \
           --s3-chunk-size=$S3_CHUNK_SIZE \
           --s3-upload-concurrency=$S3_UPLOAD_CONCURRENCY \
+          --no-traverse \
+          --retries 3 \
+          --low-level-retries 10 \
           --progress; then
           
           # Get filename for verification
@@ -454,16 +473,17 @@ runs:
           # Test write permissions with smaller file
           echo ""
           echo "Testing write permissions with small test file..."
-          test_file="upload_test_$(date +%s).tmp"
+          # Use unique test file name to avoid conflicts
+          test_file="upload_test_$$_${RANDOM}_$(date +%s).tmp"
           echo "test" > "$test_file"
-          
-          if timeout 10 rclone copy "$test_file" pawsey0012:"$bucket/" 2>/dev/null; then
+
+          if timeout 10 rclone copy "$test_file" pawsey0012:"$bucket/" --no-traverse 2>/dev/null; then
             echo "✓ Small file upload successful - issue may be with large file handling"
             echo "  Possible solutions:"
             echo "    - Check if there are file size limits"
             echo "    - Try different chunk sizes"
             echo "    - Check network stability for large transfers"
-            rclone delete pawsey0012:"$bucket/$test_file" 2>/dev/null || true
+            rclone delete pawsey0012:"$bucket/$test_file" --no-traverse 2>/dev/null || true
           else
             echo "✗ Cannot upload even small test files"
             echo "  This confirms a permissions or connectivity issue"
@@ -472,8 +492,19 @@ runs:
             echo "    - s3:PutObjectAcl (may be required)"
             echo "    - s3:GetObject (for verification)"
           fi
-          
+
           rm -f "$test_file"
           echo "================================"
           exit 1
+        fi
+
+    - name: Cleanup rclone config
+      if: always()
+      shell: bash
+      run: |
+        # Clean up temporary rclone config directory
+        if [ -n "${RCLONE_CONFIG_DIR:-}" ] && [ -d "${RCLONE_CONFIG_DIR}" ]; then
+          echo "Cleaning up rclone config directory: ${RCLONE_CONFIG_DIR}"
+          rm -rf "${RCLONE_CONFIG_DIR}"
+          echo "✓ Cleanup completed"
         fi
