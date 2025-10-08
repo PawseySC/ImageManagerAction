@@ -1,5 +1,9 @@
+# Template parameters
+ARG DEBIAN_VERSION=stretch
+ARG CURL_ENABLED=no
+
 # use node:10
-FROM debian:stretch
+FROM debian:${DEBIAN_VERSION}
 
 # install some common tools (these packages have many vulnerabilities in node:10)
 RUN set -eux; \
@@ -12,4 +16,4 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 # default command
 CMD ["node", "-v"]
-LABEL org.opencontainers.image.version=0.0.15 org.opencontainers.image.devmode=false org.opencontainers.image.noscan=false org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.10 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86

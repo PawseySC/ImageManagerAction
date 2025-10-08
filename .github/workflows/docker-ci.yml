@@ -37,6 +37,10 @@ jobs:
       # - dockerhub_available: Whether Docker Hub credentials are available
       # - quayio_available: Whether Quay.io credentials are available
       # - setonixreg_available: Whether Setonix Registry credentials are available
+      # Template/Matrix outputs:
+      # - build_matrix: JSON matrix configuration for multi-variant builds
+      # - has_template: Whether template field exists in manifest
+      # - variant_count: Number of build variants
       proceed_valid: ${{ steps.validate_manifest.outputs.proceed_valid }}
       main: ${{ steps.validate_manifest.outputs.main }}
       feature: ${{ steps.validate_manifest.outputs.feature }}
@@ -53,6 +57,9 @@ jobs:
       dockerhub_available: ${{ steps.check_vars_secrets.outputs.dockerhub_available }}
       quayio_available: ${{ steps.check_vars_secrets.outputs.quayio_available }}
       setonixreg_available: ${{ steps.check_vars_secrets.outputs.setonixreg_available }}
+      build_matrix: ${{ steps.process_template.outputs.matrix }}
+      has_template: ${{ steps.process_template.outputs.has_template }}
+      variant_count: ${{ steps.process_template.outputs.variant_count }}
     
     steps:
       - name: Initialize runner configuration
@@ -343,26 +350,103 @@ jobs:
           date_tag=$(date +'%m-%d')
           echo "Date tag: $date_tag"
           echo "date=$date_tag" >> $GITHUB_OUTPUT
-      
+
+      - name: Process template and generate build matrix
+        if: steps.validate_manifest.outputs.proceed_valid == 'true'
+        id: process_template
+        uses: ./.github/actions/process-template
+        with:
+          manifest_path: ${{ steps.validate_manifest.outputs.branch_path }}/manifest.json
+          dockerfile_path: ${{ steps.validate_manifest.outputs.dockerfile_path }}
+
+      - name: Display build matrix configuration
+        if: steps.validate_manifest.outputs.proceed_valid == 'true'
+        run: |
+          echo "=== Build Matrix Configuration ==="
+          echo "Has template: ${{ steps.process_template.outputs.has_template }}"
+          echo "Variant count: ${{ steps.process_template.outputs.variant_count }}"
+          echo ""
+          echo "Matrix configuration:"
+          echo '${{ steps.process_template.outputs.matrix }}' | jq '.'
+          echo "=================================="
+
   BUILD-job:
     needs: PREPARE-job
     runs-on: setonix-podman02
     if: needs.PREPARE-job.outputs.proceed_valid == 'true'
+    strategy:
+      matrix: ${{ fromJson(needs.PREPARE-job.outputs.build_matrix) }}
+      fail-fast: false
     outputs:
       image_tag: ${{ steps.build_container.outputs.image_tag }}
       image_name: ${{ steps.build_container.outputs.image_name }}
     steps:
-      - name: Display build environment
-        run: |
-          echo "Hostname: $(hostname)"
-          echo "Building: ${{ needs.PREPARE-job.outputs.main }}/${{ needs.PREPARE-job.outputs.feature }}:${{ needs.PREPARE-job.outputs.version }}"
-          echo "Platform: ${{ needs.PREPARE-job.outputs.platform }}"
-          echo "Correlation ID: ${{ needs.PREPARE-job.outputs.correlation_id }}"
-
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Compute variant suffix and display build info
+        id: compute_variant
+        run: |
+          set -euo pipefail
+
+          # Get template values from matrix
+          template_values='${{ toJson(matrix.values) }}'
+          variant_index="${{ matrix.index }}"
+
+          # Compute variant name and suffix from template values
+          if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+            # Generate variant name from template values
+            variant_name=$(echo "$template_values" | jq -r 'to_entries | map(.key + "-" + .value) | join("-")')
+            variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+          else
+            variant_name="default"
+            variant_suffix=""
+          fi
+
+          echo "=========================================="
+          echo "Build Environment"
+          echo "=========================================="
+          echo "Hostname: $(hostname)"
+          echo "Building: ${{ needs.PREPARE-job.outputs.main }}/${{ needs.PREPARE-job.outputs.feature }}:${{ needs.PREPARE-job.outputs.version }}${variant_suffix}"
+          echo "Platform: ${{ needs.PREPARE-job.outputs.platform }}"
+          echo "Correlation ID: ${{ needs.PREPARE-job.outputs.correlation_id }}"
+          echo "Variant #${variant_index}: $variant_name"
+          echo "=========================================="
+
+          # Export for use in subsequent steps
+          echo "VARIANT_SUFFIX=$variant_suffix" >> $GITHUB_ENV
+          echo "VARIANT_NAME=$variant_name" >> $GITHUB_ENV
+
+      - name: Apply template values to Dockerfile
+        if: needs.PREPARE-job.outputs.has_template == 'true'
+        run: |
+          set -euo pipefail
+
+          dockerfile="${{ needs.PREPARE-job.outputs.dockerfile_path }}"
+          template_values='${{ toJson(matrix.values) }}'
+
+          echo "Processing Dockerfile: $dockerfile"
+          echo "Template values: $template_values"
+
+          # Create a backup of original Dockerfile
+          cp "$dockerfile" "$dockerfile.original"
+
+          # Parse template values and modify ARG lines in Dockerfile
+          echo "$template_values" | jq -r 'to_entries[] | "\(.key)=\(.value)"' | while IFS='=' read -r arg_name arg_value; do
+            echo "Replacing ARG $arg_name with value: $arg_value"
+
+            # Use sed to replace ARG lines
+            # Pattern: ARG <name>=<any_value> -> ARG <name>=<new_value>
+            sed -i "s|^ARG ${arg_name}=.*|ARG ${arg_name}=${arg_value}|g" "$dockerfile"
+          done
+
+          echo "✓ Dockerfile modifications completed"
+          echo ""
+          echo "=== Modified ARG lines ==="
+          grep "^ARG" "$dockerfile" || echo "No ARG lines found"
+          echo "=========================="
 
       - name: Configure podman environment
         id: setup_env
@@ -471,10 +555,11 @@ jobs:
           main="${{ needs.PREPARE-job.outputs.main }}"
           feature="${{ needs.PREPARE-job.outputs.feature }}"
           version="${{ needs.PREPARE-job.outputs.version }}"
-          
+
           # Create image name from main and feature
           image_name="${main}-${feature}"
-          image_tag="${image_name}:${version}"
+          # Add variant suffix to version (VARIANT_SUFFIX is set in previous step)
+          image_tag="${image_name}:${version}${VARIANT_SUFFIX}"
           
           # Set up cache tracking (Podman uses native layer caching)
           IMAGE_CACHE_REF="${main}-${feature}:cache"
@@ -539,9 +624,9 @@ jobs:
           image_tag="${{ steps.build_container.outputs.image_tag }}"
           image_name="${{ steps.build_container.outputs.image_name }}"
           version="${{ needs.PREPARE-job.outputs.version }}"
-          
-          # Define output file
-          output_file="${image_name}_${version}.tar"
+
+          # Define output file with variant suffix (VARIANT_SUFFIX from env)
+          output_file="${image_name}_${version}${VARIANT_SUFFIX}.tar"
           
           echo "Saving container to Docker archive..."
           echo "Image: $image_tag"
@@ -583,9 +668,10 @@ jobs:
           archive_file="${{ steps.save_container.outputs.archive_file }}"
           image_name="${{ steps.build_container.outputs.image_name }}"
           version="${{ needs.PREPARE-job.outputs.version }}"
-          
-          # Define SIF output file
-          sif_file="${image_name}_${version}.sif"
+          variant_suffix="${{ matrix.variant_suffix }}"
+
+          # Define SIF output file with variant suffix
+          sif_file="${image_name}_${version}${variant_suffix}.sif"
           
           echo "Loading Singularity module and generating SIF file..."
           echo "Source: docker-archive://$archive_file"
@@ -658,16 +744,31 @@ jobs:
     needs: [BUILD-job, PREPARE-job]
     runs-on: setonix-podman02
     if: needs.PREPARE-job.outputs.proceed_valid == 'true' && needs.PREPARE-job.outputs.noscan != 'true'
+    strategy:
+      matrix: ${{ fromJson(needs.PREPARE-job.outputs.build_matrix) }}
+      fail-fast: false
     env:
       IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
       VERSION: ${{ needs.PREPARE-job.outputs.version }}
       REPORT_DIR: ./trivy-reports
     steps:
+    - name: Compute variant info
+      run: |
+        # Compute VARIANT_SUFFIX from matrix.values
+        template_values='${{ toJson(matrix.values) }}'
+        if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+        else
+          variant_suffix=""
+        fi
+        echo "VARIANT_SUFFIX=$variant_suffix" >> $GITHUB_ENV
+
     - name: Display scan environment
       run: |
           echo "Hostname: $(hostname)"
-          echo "Scanning: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
+          echo "Scanning: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}${VARIANT_SUFFIX}"
           echo "No Scan Flag: ${{ needs.PREPARE-job.outputs.noscan }}"
+          echo "Variant #${{ matrix.index }}"
 
     - name: Download archive from S3
       id: locate
@@ -677,10 +778,10 @@ jobs:
         secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
         endpoint: https://projects.pawsey.org.au
         bucket: ${{ vars.ACACIA_BUCKETNAME }}
-        destination_path: ${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar
+        destination_path: ${{ env.IMAGE_NAME }}_${{ env.VERSION }}${{ env.VARIANT_SUFFIX }}.tar
         download_mode: true
         dockerfile_name: ${{ env.IMAGE_NAME }}
-        version: ${{ env.VERSION }}
+        version: ${{ env.VERSION }}${{ env.VARIANT_SUFFIX }}
         load_to_podman: false
 
     - name: Initialize scan workspace
@@ -857,15 +958,30 @@ jobs:
     needs: [BUILD-job, PREPARE-job]
     runs-on: setonix-podman02
     if: needs.PREPARE-job.outputs.proceed_valid == 'true'
+    strategy:
+      matrix: ${{ fromJson(needs.PREPARE-job.outputs.build_matrix) }}
+      fail-fast: false
     env:
       IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
       VERSION: ${{ needs.PREPARE-job.outputs.version }}
       BUCKET: ${{ vars.ACACIA_BUCKETNAME }}
     steps:
+    - name: Compute variant info
+      run: |
+        # Compute VARIANT_SUFFIX from matrix.values
+        template_values='${{ toJson(matrix.values) }}'
+        if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+        else
+          variant_suffix=""
+        fi
+        echo "VARIANT_SUFFIX=$variant_suffix" >> $GITHUB_ENV
+
     - name: Display registry environment
       run: |
         echo "Hostname: $(hostname)"
-        echo "Pushing: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
+        echo "Pushing: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}${VARIANT_SUFFIX}"
+        echo "Variant #${{ matrix.index }}"
 
     - name: Configure podman environment
       run: |
@@ -899,10 +1015,10 @@ jobs:
         secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
         endpoint: https://projects.pawsey.org.au
         bucket: ${{ env.BUCKET }}
-        destination_path: ${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar
+        destination_path: ${{ env.IMAGE_NAME }}_${{ env.VERSION }}${{ env.VARIANT_SUFFIX }}.tar
         download_mode: true
         dockerfile_name: ${{ env.IMAGE_NAME }}
-        version: ${{ env.VERSION }}
+        version: ${{ env.VERSION }}${{ env.VARIANT_SUFFIX }}
         load_to_podman: false
 
     - name: Push to Setonix private registry
@@ -943,8 +1059,8 @@ jobs:
         fi
         
         # Tag and push
-        image_tag="${IMAGE_NAME}:${VERSION}"
-        setonix_tag="setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}"
+        image_tag="${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
+        setonix_tag="setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
         
         echo ""
         echo "🏷️  Tagging image for Setonix Registry:"
@@ -977,17 +1093,35 @@ jobs:
     needs: [BUILD-job, PREPARE-job, PUSH-PRIV-job]
     runs-on: setonix-podman02
     if: needs.PREPARE-job.outputs.proceed_valid == 'true'
+    strategy:
+      matrix: ${{ fromJson(needs.PREPARE-job.outputs.build_matrix) }}
+      fail-fast: false
+    # Environment selection based on devmode flag:
+    # - If devmode=true: Use 'devmode_skip_approval' environment (no manual approval required)
+    # - If devmode=false: Use 'manual_approval' environment (requires manual approval)
     environment:
-      name: manual_approval
+      name: ${{ needs.PREPARE-job.outputs.devmode == 'true' && 'devmode_skip_approval' || 'manual_approval' }}
     env:
       IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
       VERSION: ${{ needs.PREPARE-job.outputs.version }}
       TARGETS: ${{ needs.PREPARE-job.outputs.targets }}
     steps:
+    - name: Compute variant info
+      run: |
+        # Compute VARIANT_SUFFIX from matrix.values
+        template_values='${{ toJson(matrix.values) }}'
+        if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+        else
+          variant_suffix=""
+        fi
+        echo "VARIANT_SUFFIX=$variant_suffix" >> $GITHUB_ENV
+
     - name: Display public registry push plan
       run: |
         echo "Hostname: $(hostname)"
-        echo "Image: ${IMAGE_NAME}:${VERSION}"
+        echo "Image: ${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
+        echo "Variant #${{ matrix.index }}"
         echo "Configured Targets: $TARGETS"
         echo ""
         echo "=== Public Registry Push Plan ==="
@@ -1002,14 +1136,14 @@ jobs:
           case "$target" in
             "quay.io")
               if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
-                echo "[✓] Quay.io: Will push to quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+                echo "[✓] Quay.io: Will push to quay.io/pawsey/${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
               else
                 echo "[skip] Quay.io: Requested in manifest but credentials not available"
               fi
               ;;
             "setonix-registry")
               if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
-                echo "[✓] Setonix Public Registry: Will push to setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}"
+                echo "[✓] Setonix Public Registry: Will push to setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
               else
                 echo "[skip] Setonix Registry: Requested in manifest but credentials not available"
               fi
@@ -1055,10 +1189,10 @@ jobs:
         secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
         endpoint: https://projects.pawsey.org.au
         bucket: ${{ vars.ACACIA_BUCKETNAME }}
-        destination_path: ${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar
+        destination_path: ${{ env.IMAGE_NAME }}_${{ env.VERSION }}${{ env.VARIANT_SUFFIX }}.tar
         download_mode: true
         dockerfile_name: ${{ env.IMAGE_NAME }}
-        version: ${{ env.VERSION }}
+        version: ${{ env.VERSION }}${{ env.VARIANT_SUFFIX }}
         load_to_podman: true
 
     - name: Initialize Docker configuration
@@ -1091,7 +1225,7 @@ jobs:
         
         # Tag and push
         image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
-        quayio_tag="quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+        quayio_tag="quay.io/pawsey/${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
         
         echo ""
         echo "🏷️  Tagging image for Quay.io:"
@@ -1116,7 +1250,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.QUAYIO_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d '{"visibility": "public"}' \
-            "https://quay.io/api/v1/repository/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}/changevisibility")
+            "https://quay.io/api/v1/repository/pawsey/${IMAGE_NAME}/changevisibility")
           
           if echo "$visibility_response" | jq -e '.success' > /dev/null 2>&1; then
             echo "✓ Repository visibility set to public"
@@ -1151,7 +1285,7 @@ jobs:
         
         # Tag and push to public channel
         image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
-        setonix_public_tag="setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}"
+        setonix_public_tag="setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
         
         echo ""
         echo "🏷️  Tagging image for Setonix Public Registry:"
@@ -1186,13 +1320,13 @@ jobs:
         
         # Remove tagged images based on targets
         if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
-          quayio_tag="quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+          quayio_tag="quay.io/pawsey/${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
           echo "Removing Quay.io tag: $quayio_tag"
           podman rmi "$quayio_tag" 2>/dev/null || echo "  (Quay.io tag already removed or not found)"
         fi
-        
+
         if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["setonix-registry"])' > /dev/null; then
-          setonix_public_tag="setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}"
+          setonix_public_tag="setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
           echo "Removing Setonix Public tag: $setonix_public_tag"
           podman rmi "$setonix_public_tag" 2>/dev/null || echo "  (Setonix Public tag already removed or not found)"
         fi
@@ -1203,19 +1337,34 @@ jobs:
     needs: [BUILD-job, PREPARE-job, PUSH-PUBLIC-job]
     runs-on: setonix-podman02
     if: needs.PREPARE-job.outputs.proceed_valid == 'true' && (needs.PREPARE-job.outputs.quayio_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'quay.io'))
+    strategy:
+      matrix: ${{ fromJson(needs.PREPARE-job.outputs.build_matrix) }}
+      fail-fast: false
     env:
       IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
       VERSION: ${{ needs.PREPARE-job.outputs.version }}
     steps:
+      - name: Compute variant info
+        run: |
+          # Compute VARIANT_SUFFIX from matrix.values
+          template_values='${{ toJson(matrix.values) }}'
+          if [ "${{ needs.PREPARE-job.outputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+            variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")')
+          else
+            variant_suffix=""
+          fi
+          echo "VARIANT_SUFFIX=$variant_suffix" >> $GITHUB_ENV
+
       - name: Display deployment environment
         run: |
           echo "Hostname: $(hostname)"
-          echo "Starting SHPC deployment for ${IMAGE_NAME}:${VERSION}"
+          echo "Starting SHPC deployment for ${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
+          echo "Variant #${{ matrix.index }}"
           echo "Configured targets: ${{ needs.PREPARE-job.outputs.targets }}"
           echo ""
           echo "Available public registries for SHPC:"
           if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
-            echo "• Quay.io: quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+            echo "• Quay.io: quay.io/pawsey/${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
           fi
 
       - name: Load SHPC module and setup environment
@@ -1243,9 +1392,9 @@ jobs:
           
           # Use Quay.io for deployment
           if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && echo '${{ needs.PREPARE-job.outputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
-            full_image="quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}:${VERSION}"
+            full_image="quay.io/pawsey/${IMAGE_NAME}:${VERSION}${VARIANT_SUFFIX}"
             registry_url="https://quay.io/v2"
-            api_path="${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}"
+            api_path="pawsey/${IMAGE_NAME}"
             registry_type="quay.io"
           else
             echo "Error: Quay.io registry not available for deployment"
@@ -1258,15 +1407,15 @@ jobs:
           echo "API path: $api_path"
           
           # Get manifest and extract digest
-          echo "Fetching manifest for tag: ${VERSION}"
-          
+          echo "Fetching manifest for tag: ${VERSION}${VARIANT_SUFFIX}"
+
           digest=$(curl -s -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-            "$registry_url/$api_path/manifests/${VERSION}" \
+            "$registry_url/$api_path/manifests/${VERSION}${VARIANT_SUFFIX}" \
             | jq -r '.config.digest // empty')
-          
+
           if [ -z "$digest" ] || [ "$digest" = "null" ]; then
             echo "Warning: Could not get digest, using placeholder"
-            digest="sha256:placeholder_digest_for_${VERSION}"
+            digest="sha256:placeholder_digest_for_${VERSION}${VARIANT_SUFFIX}"
           fi
           
           echo "SHA256 digest: $digest"
@@ -1285,18 +1434,24 @@ jobs:
           digest="${{ steps.get_image_info.outputs.digest }}"
           
           # Create registry directory structure based on the deployed image
-          shpc_path="${SHPC_REGISTRY}/quay.io/${{ vars.QUAYIO_USERNAME }}/${IMAGE_NAME}"
-          
+          # Include variant suffix in the path for multi-variant builds
+          variant_path_suffix=""
+          if [ -n "${VARIANT_SUFFIX}" ]; then
+            # Replace special characters in variant suffix for directory path
+            variant_path_suffix=$(echo "${VARIANT_SUFFIX}" | sed 's/^-/\//')
+          fi
+          shpc_path="${SHPC_REGISTRY}/quay.io/pawsey/${IMAGE_NAME}${variant_path_suffix}"
+
           echo "Creating SHPC registry entry at: $shpc_path"
-          
+
           # Create container.yaml content
           container_yaml=$(cat <<EOF
           docker: $full_image
-          
+
           latest:
-            "${VERSION}": "$digest"
+            "${VERSION}${VARIANT_SUFFIX}": "$digest"
           tags:
-            "${VERSION}": "$digest"
+            "${VERSION}${VARIANT_SUFFIX}": "$digest"
           
           maintainer: "@image-manager-ci"
           
@@ -1308,6 +1463,8 @@ jobs:
             main: "${{ needs.PREPARE-job.outputs.main }}"
             feature: "${{ needs.PREPARE-job.outputs.feature }}"
             platform: "${{ needs.PREPARE-job.outputs.platform }}"
+            variant_index: ${{ matrix.index }}
+            variant_suffix: "${VARIANT_SUFFIX}"
             correlation_id: "${{ needs.PREPARE-job.outputs.correlation_id }}"
             branch: "${{ github.ref_name }}"
             deployed_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -1350,7 +1507,8 @@ jobs:
           echo "✅ SHPC deployment completed"
           echo "Registry path: $shpc_path"
           echo "Image: $full_image"
-          echo "Version: ${VERSION}"
+          echo "Version: ${VERSION}${VARIANT_SUFFIX}"
+          echo "Variant #${{ matrix.index }}"
           echo "Digest: $digest"
           echo "Correlation ID: ${{ needs.PREPARE-job.outputs.correlation_id }}"
 
@@ -1359,19 +1517,22 @@ jobs:
     runs-on: ubuntu-latest
     if: always() && needs.PREPARE-job.outputs.proceed_valid == 'true'
     env:
-      IMAGE_NAME: ${{ needs.BUILD-job.outputs.image_name }}
-      VERSION: ${{ needs.PREPARE-job.outputs.version }}
       MAIN: ${{ needs.PREPARE-job.outputs.main }}
       FEATURE: ${{ needs.PREPARE-job.outputs.feature }}
+      VERSION: ${{ needs.PREPARE-job.outputs.version }}
       PLATFORM: ${{ needs.PREPARE-job.outputs.platform }}
       CORRELATION_ID: ${{ needs.PREPARE-job.outputs.correlation_id }}
+      VARIANT_COUNT: ${{ needs.PREPARE-job.outputs.variant_count }}
+      HAS_TEMPLATE: ${{ needs.PREPARE-job.outputs.has_template }}
     steps:
       - name: Generate deployment summary
         run: |
+          IMAGE_NAME="${MAIN}-${FEATURE}"
+
           {
             echo "# 🚀 Image Manager CI/CD Summary"
             echo ""
-            echo "**Image:** \`${{ env.IMAGE_NAME }}:${{ env.VERSION }}\`"
+            echo "**Image:** \`${IMAGE_NAME}:${VERSION}\`"
             echo "**Main Software:** \`${{ env.MAIN }}\`"
             echo "**Feature:** \`${{ env.FEATURE }}\`"
             echo "**Platform:** \`${{ env.PLATFORM }}\`"
@@ -1380,104 +1541,203 @@ jobs:
             echo "**Branch:** \`${{ github.ref_name }}\`"
             echo "**Timestamp:** $(date '+%Y-%m-%d %H:%M:%S UTC')"
             echo ""
+
+            # Template/Variant Information
+            if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
+              echo "## 🔀 Multi-Variant Build"
+              echo ""
+              echo "**Variant Count:** ${{ env.VARIANT_COUNT }}"
+              echo ""
+              echo "Matrix configuration generated ${{ env.VARIANT_COUNT }} build variant(s) based on template parameters."
+              echo ""
+            fi
             
             echo "## 📦 Archive Storage"
             echo ""
-            echo "| Location | Address | Status |"
-            echo "|----------|---------|--------|"
-            
-            # S3 Docker Archive Storage
-            if [ "${{ needs.BUILD-job.result }}" = "success" ]; then
-              echo "| S3 Docker Archive | \`s3://${{ vars.ACACIA_BUCKETNAME }}/${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar\` | ✅ Uploaded |"
+
+            if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
+              echo "> **Note:** This build produced ${{ env.VARIANT_COUNT }} variant(s). Each variant has separate Docker archive and SIF files."
+              echo ""
+              echo "**Docker Archives** (\`s3://${{ vars.ACACIA_BUCKETNAME }}/\`):"
+
+              # Parse matrix and compute variant_suffix for each variant
+              matrix_json='${{ needs.PREPARE-job.outputs.build_matrix }}'
+              echo "$matrix_json" | jq -r '.include[] |
+                .values |
+                to_entries |
+                map("-" + .key + "-" + .value) |
+                join("") as $suffix |
+                "- `'${IMAGE_NAME}_${VERSION}'" + $suffix + ".tar`"'
+
+              echo ""
+              echo "**Singularity SIF Files** (\`s3://${{ vars.ACACIA_SIF_BUCKETNAME }}/\`):"
+              echo "$matrix_json" | jq -r '.include[] |
+                .values |
+                to_entries |
+                map("-" + .key + "-" + .value) |
+                join("") as $suffix |
+                "- `'${IMAGE_NAME}_${VERSION}'" + $suffix + ".sif`"'
             else
-              echo "| S3 Docker Archive | \`s3://${{ vars.ACACIA_BUCKETNAME }}/${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar\` | ❌ Failed |"
+              echo "| Location | Address | Status |"
+              echo "|----------|---------|--------|"
+
+              # S3 Docker Archive Storage
+              if [ "${{ needs.BUILD-job.result }}" = "success" ]; then
+                echo "| S3 Docker Archive | \`s3://${{ vars.ACACIA_BUCKETNAME }}/${IMAGE_NAME}_${VERSION}.tar\` | ✅ Uploaded |"
+              else
+                echo "| S3 Docker Archive | \`s3://${{ vars.ACACIA_BUCKETNAME }}/${IMAGE_NAME}_${VERSION}.tar\` | ❌ Failed |"
+              fi
+
+              # S3 Singularity SIF Storage
+              if [ "${{ needs.BUILD-job.result }}" = "success" ]; then
+                echo "| S3 Singularity SIF | \`s3://${{ vars.ACACIA_SIF_BUCKETNAME }}/${IMAGE_NAME}_${VERSION}.sif\` | ✅ Uploaded |"
+              else
+                echo "| S3 Singularity SIF | \`s3://${{ vars.ACACIA_SIF_BUCKETNAME }}/${IMAGE_NAME}_${VERSION}.sif\` | ❌ Failed |"
+              fi
             fi
-            
-            # S3 Singularity SIF Storage
-            if [ "${{ needs.BUILD-job.result }}" = "success" ]; then
-              echo "| S3 Singularity SIF | \`s3://${{ vars.ACACIA_SIF_BUCKETNAME }}/${{ env.IMAGE_NAME }}_${{ env.VERSION }}.sif\` | ✅ Uploaded |"
-            else
-              echo "| S3 Singularity SIF | \`s3://${{ vars.ACACIA_SIF_BUCKETNAME }}/${{ env.IMAGE_NAME }}_${{ env.VERSION }}.sif\` | ❌ Failed |"
-            fi
-            
+
             echo ""
             echo "## 🏗️ Container Registry Deployments"
             echo ""
-            echo "| Registry | Address | Status |"
-            echo "|----------|---------|--------|"
-            
-            # Parse configured targets
-            targets='${{ needs.PREPARE-job.outputs.targets }}'
-            
-            # Setonix Private Registry (always attempted if credentials available)
-            private_targets='${{ needs.PREPARE-job.outputs.private_targets }}'
-            private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
-            if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ] && [ "${{ needs.PUSH-PRIV-job.result }}" = "success" ]; then
-              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Pushed |"
-            elif [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
-              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ❌ Failed |"
-            else
-              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Skipped (No credentials) |"
-            fi
-            
-            
-            # Quay.io (only if in targets)
-            if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1; then
-              if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && [ "${{ needs.PUSH-PUBLIC-job.result }}" = "success" ]; then
-                echo "| Quay.io | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Pushed |"
-              elif [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
-                echo "| Quay.io | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ❌ Failed |"
-              else
-                echo "| Quay.io | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Skipped (No credentials) |"
+
+            if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
+              echo "> **Note:** Each of the ${{ env.VARIANT_COUNT }} variant(s) has been pushed to the configured registries."
+              echo ""
+
+              # Parse configured targets
+              targets='${{ needs.PREPARE-job.outputs.targets }}'
+              private_targets='${{ needs.PREPARE-job.outputs.private_targets }}'
+              private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
+              matrix_json='${{ needs.PREPARE-job.outputs.build_matrix }}'
+
+              # Setonix Private Registry
+              if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
+                echo "### Setonix Private Registry"
+                echo ""
+                echo "$matrix_json" | jq -r '.include[] | "- `setonix-registry.pawsey.org.au/'${private_username}'/'${IMAGE_NAME}':'${VERSION}'" + .variant_suffix + "`"'
+                echo ""
+              fi
+
+              # Quay.io
+              if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
+                echo "### Quay.io Public Registry"
+                echo ""
+                echo "$matrix_json" | jq -r '.include[] | "- `quay.io/pawsey/'${IMAGE_NAME}':'${VERSION}'" + .variant_suffix + "`"'
+                echo ""
+              fi
+
+              # Setonix Public
+              if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
+                echo "### Setonix Public Registry"
+                echo ""
+                echo "$matrix_json" | jq -r '.include[] | "- `setonix-registry.pawsey.org.au/pawsey/'${IMAGE_NAME}':'${VERSION}'" + .variant_suffix + "`"'
+                echo ""
               fi
             else
-              echo "| Quay.io | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Not in targets |"
-            fi
-            
-            # Setonix Public Registry (only if in targets)
-            if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1; then
-              if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ] && [ "${{ needs.PUSH-PUBLIC-job.result }}" = "success" ]; then
-                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Pushed |"
+              echo "| Registry | Address | Status |"
+              echo "|----------|---------|--------|"
+
+              # Parse configured targets
+              targets='${{ needs.PREPARE-job.outputs.targets }}'
+
+              # Setonix Private Registry (always attempted if credentials available)
+              private_targets='${{ needs.PREPARE-job.outputs.private_targets }}'
+              private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
+              if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ] && [ "${{ needs.PUSH-PRIV-job.result }}" = "success" ]; then
+                echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |"
               elif [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
-                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ❌ Failed |"
+                echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |"
               else
-                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Skipped (No credentials) |"
+                echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ⏭️ Skipped (No credentials) |"
               fi
-            else
-              echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ⏭️ Not in targets |"
+
+
+              # Quay.io (only if in targets)
+              if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1; then
+                if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && [ "${{ needs.PUSH-PUBLIC-job.result }}" = "success" ]; then
+                  echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |"
+                elif [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
+                  echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |"
+                else
+                  echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Skipped (No credentials) |"
+                fi
+              else
+                echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Not in targets |"
+              fi
+
+              # Setonix Public Registry (only if in targets)
+              if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1; then
+                if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ] && [ "${{ needs.PUSH-PUBLIC-job.result }}" = "success" ]; then
+                  echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |"
+                elif [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
+                  echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |"
+                else
+                  echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Skipped (No credentials) |"
+                fi
+              else
+                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Not in targets |"
+              fi
             fi
             
             echo ""
             echo "## 🚀 SHPC Container Deployment"
             echo ""
-            echo "| Registry Path | Image Source | Status |"
-            echo "|---------------|--------------|--------|"
-            
+
             # SHPC deployment status
             if [ "${{ needs.DEPLOY-job.result }}" = "success" ]; then
               # Use Quay.io for SHPC deployment
+              targets='${{ needs.PREPARE-job.outputs.targets }}'
               if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
-                echo "| \`/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry/quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}/\` | \`quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}\` | ✅ Deployed |"
-                shpc_image="quay.io/${{ vars.QUAYIO_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
+                if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
+                  echo "> **Note:** Each of the ${{ env.VARIANT_COUNT }} variant(s) has been deployed to SHPC registry."
+                  echo ""
+                  echo "**SHPC Registry Path:** \`/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry/quay.io/pawsey/${IMAGE_NAME}/\`"
+                  echo ""
+                  echo "**Available Variants:**"
+                  matrix_json='${{ needs.PREPARE-job.outputs.build_matrix }}'
+                  echo "$matrix_json" | jq -r '.include[] | "- `quay.io/pawsey/'${IMAGE_NAME}':'${VERSION}'" + .variant_suffix + "`"'
+                  echo ""
+                  echo "### SHPC Usage Commands"
+                  echo ""
+                  echo "Load and use a specific variant via SHPC:"
+                  echo "\`\`\`bash"
+                  echo "# Load SHPC module"
+                  echo "module load shpc/0.1.32"
+                  echo ""
+                  echo "# List available variants"
+                  echo "shpc show quay.io/pawsey/${IMAGE_NAME}"
+                  echo ""
+                  echo "# Install a specific variant (example with first variant)"
+                  first_variant=$(echo "$matrix_json" | jq -r '.include[0].variant_suffix')
+                  echo "shpc install quay.io/pawsey/${IMAGE_NAME}:${VERSION}${first_variant}"
+                  echo ""
+                  echo "# Use the container"
+                  echo "shpc run quay.io/pawsey/${IMAGE_NAME}:${VERSION}${first_variant} <command>"
+                  echo "\`\`\`"
+                else
+                  shpc_image="quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
+                  echo "| Registry Path | Image Source | Status |"
+                  echo "|---------------|--------------|--------|"
+                  echo "| \`/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry/quay.io/pawsey/${IMAGE_NAME}/\` | \`$shpc_image\` | ✅ Deployed |"
+                  echo ""
+                  echo "### SHPC Usage Commands"
+                  echo ""
+                  echo "Load and use the container via SHPC:"
+                  echo "\`\`\`bash"
+                  echo "# Load SHPC module"
+                  echo "module load shpc/0.1.32"
+                  echo ""
+                  echo "# Install the container"
+                  echo "shpc install $shpc_image"
+                  echo ""
+                  echo "# Show available commands"
+                  echo "shpc show $shpc_image"
+                  echo ""
+                  echo "# Use the container"
+                  echo "shpc run $shpc_image <command>"
+                  echo "\`\`\`"
+                fi
               fi
-              
-              echo ""
-              echo "### SHPC Usage Commands"
-              echo ""
-              echo "Load and use the container via SHPC:"
-              echo "\`\`\`bash"
-              echo "# Load SHPC module"
-              echo "module load shpc/0.1.32"
-              echo ""
-              echo "# Install the container"
-              echo "shpc install $shpc_image"
-              echo ""
-              echo "# Show available commands"
-              echo "shpc show $shpc_image"
-              echo ""
-              echo "# Use the container"
-              echo "shpc run $shpc_image <command>"
-              echo "\`\`\`"
             elif [ "${{ needs.DEPLOY-job.result }}" = "failure" ]; then
               echo "| SHPC Registry | N/A | ❌ Deployment Failed |"
             elif [ "${{ needs.DEPLOY-job.result }}" = "skipped" ]; then

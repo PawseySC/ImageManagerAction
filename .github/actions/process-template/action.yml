@@ -1,0 +1,133 @@
+name: 'Process Template'
+description: 'Processes template field from manifest.json and generates matrix configurations for multi-variant builds'
+inputs:
+  manifest_path:
+    description: 'Path to manifest.json file'
+    required: true
+  dockerfile_path:
+    description: 'Path to Dockerfile'
+    required: true
+outputs:
+  matrix:
+    description: 'JSON matrix configuration for GitHub Actions'
+    value: ${{ steps.generate_matrix.outputs.matrix }}
+  has_template:
+    description: 'Whether template field exists in manifest'
+    value: ${{ steps.generate_matrix.outputs.has_template }}
+  variant_count:
+    description: 'Number of variants to build'
+    value: ${{ steps.generate_matrix.outputs.variant_count }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate matrix from template
+      id: generate_matrix
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        manifest_file="${{ inputs.manifest_path }}"
+        dockerfile="${{ inputs.dockerfile_path }}"
+
+        echo "Processing template from: $manifest_file"
+        echo "Target Dockerfile: $dockerfile"
+
+        # Check if template field exists
+        if ! jq -e '.template' "$manifest_file" > /dev/null 2>&1; then
+          echo "No template field found in manifest.json"
+          echo "has_template=false" >> $GITHUB_OUTPUT
+          echo "variant_count=1" >> $GITHUB_OUTPUT
+          echo "matrix={\"include\":[{\"index\":1,\"values\":{}}]}" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo "✓ Template field found"
+        echo "has_template=true" >> $GITHUB_OUTPUT
+
+        # Extract template object
+        template=$(jq -c '.template' "$manifest_file")
+        echo "Template content: $template"
+
+        # Parse template and separate arrays from strings
+        # This script will generate all combinations using cartesian product
+
+        # Step 1: Extract all keys and their values
+        keys=$(echo "$template" | jq -r 'keys[]')
+
+        # Step 2: Build arrays for cartesian product
+        # We'll use a shell approach to generate all combinations
+
+        # Create temporary file to store intermediate results
+        temp_dir=$(mktemp -d)
+        combinations_file="$temp_dir/combinations.json"
+
+        # Initialize with empty array
+        echo '[]' > "$combinations_file"
+
+        # Function to generate cartesian product
+        # We'll iterate through each key and expand combinations
+
+        first_key=true
+        for key in $keys; do
+          value=$(echo "$template" | jq -c --arg k "$key" '.[$k]')
+
+          # Check if value is array or string
+          if echo "$value" | jq -e 'type == "array"' > /dev/null 2>&1; then
+            # It's an array
+            values=$(echo "$value" | jq -r '.[]')
+          else
+            # It's a string, treat as single-element array
+            values=$(echo "$value" | jq -r '.')
+          fi
+
+          if [ "$first_key" = true ]; then
+            # First key: create initial combinations
+            echo "$values" | while IFS= read -r val; do
+              echo "{\"$key\": \"$val\"}"
+            done | jq -s '.' > "$combinations_file"
+            first_key=false
+          else
+            # Subsequent keys: expand existing combinations
+            old_combinations=$(cat "$combinations_file")
+            new_combinations='[]'
+
+            for val in $values; do
+              expanded=$(echo "$old_combinations" | jq --arg k "$key" --arg v "$val" \
+                'map(. + {($k): $v})')
+              new_combinations=$(echo "$new_combinations" "$expanded" | jq -s 'add')
+            done
+
+            echo "$new_combinations" > "$combinations_file"
+          fi
+        done
+
+        # Read final combinations
+        combinations=$(cat "$combinations_file")
+        variant_count=$(echo "$combinations" | jq 'length')
+
+        echo "✓ Generated $variant_count variant(s)"
+        echo "Combinations:"
+        echo "$combinations" | jq '.'
+
+        # Step 3: Generate matrix configuration
+        # Use simple index for clean GitHub Actions UI display
+        matrix_json=$(echo "$combinations" | jq -c '[
+          to_entries |
+          .[] |
+          {
+            index: (.key + 1),
+            values: .value
+          }
+        ] | {include: .}')
+
+        echo "Generated matrix:"
+        echo "$matrix_json" | jq '.'
+
+        # Set outputs
+        echo "variant_count=$variant_count" >> $GITHUB_OUTPUT
+        echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+
+        # Cleanup
+        rm -rf "$temp_dir"
+
+        echo "✅ Matrix generation completed"

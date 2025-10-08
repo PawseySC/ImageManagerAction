@@ -1,10 +1,17 @@
 {
   "main": "ex3",
   "feature": "test3",
-  "version": "0.0.16",
-  "devmode": false,
-  "noscan": false,
+  "version": "0.0.10",
+  "devmode": true,
+  "noscan": true,
   "platform": "x86",
+  "template": {
+    "DEBIAN_VERSION": [
+      "stretch",
+      "buster"
+    ],
+    "CURL_ENABLED": "yes"
+  },
   "targets": [
     "quay.io",
     "setonix-registry"
@@ -18,7 +25,7 @@
     "path": "ex3/test3/"
   },
   "metadata": {
-    "timestamp": "2025-09-17T00:10:36.224974Z",
-    "correlation_id": "2fd67ad2-0e95-4e23-885f-a774639f1c26"
+    "timestamp": "2025-09-17T09:21:50.636269Z",
+    "correlation_id": "f3e3a384-9b30-41ae-92f5-7c03653f2374"
   }
 }
