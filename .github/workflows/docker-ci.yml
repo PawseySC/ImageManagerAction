@@ -1465,7 +1465,7 @@ jobs:
           echo "✅ SHPC deployment completed"
           echo "Registry path: $shpc_path"
           echo "Image: $full_image"
-          echo "Version: ${VERSION}${VARIANT_SUFFIX}"
+          echo "Version: ${VERSION}"
           echo "Variant #${{ matrix.index }}"
           echo "Digest: $digest"
           echo "Correlation ID: ${{ needs.PREPARE-job.outputs.correlation_id }}"
@@ -1523,7 +1523,7 @@ jobs:
               echo "$matrix_json" | jq -r '.include[] |
                 .values |
                 to_entries |
-                map("-" + .key + "-" + (.value | ascii_downcase)) |
+                map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
                 join("") as $suffix |
                 "- `'${IMAGE_NAME}'" + $suffix + "_${VERSION}.tar`"'
 
@@ -1532,7 +1532,7 @@ jobs:
               echo "$matrix_json" | jq -r '.include[] |
                 .values |
                 to_entries |
-                map("-" + .key + "-" + (.value | ascii_downcase)) |
+                map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
                 join("") as $suffix |
                 "- `'${IMAGE_NAME}'" + $suffix + "_${VERSION}.sif`"'
             else
@@ -1575,7 +1575,7 @@ jobs:
                 echo "$matrix_json" | jq -r '.include[] |
                   .values |
                   to_entries |
-                  map("-" + .key + "-" + (.value | ascii_downcase)) |
+                  map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
                   join("") as $suffix |
                   "- `setonix-registry.pawsey.org.au/'${private_username}'/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
                 echo ""
@@ -1588,7 +1588,7 @@ jobs:
                 echo "$matrix_json" | jq -r '.include[] |
                   .values |
                   to_entries |
-                  map("-" + .key + "-" + (.value | ascii_downcase)) |
+                  map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
                   join("") as $suffix |
                   "- `quay.io/pawsey/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
                 echo ""
@@ -1601,7 +1601,7 @@ jobs:
                 echo "$matrix_json" | jq -r '.include[] |
                   .values |
                   to_entries |
-                  map("-" + .key + "-" + (.value | ascii_downcase)) |
+                  map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
                   join("") as $suffix |
                   "- `setonix-registry.pawsey.org.au/pawsey/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
                 echo ""
@@ -1671,7 +1671,7 @@ jobs:
                   echo "$matrix_json" | jq -r '.include[] |
                     .values |
                     to_entries |
-                    map("-" + .key + "-" + (.value | ascii_downcase)) |
+                    map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
                     join("") as $suffix |
                     "- `quay.io/pawsey/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
                   echo ""
@@ -1683,7 +1683,7 @@ jobs:
                   echo "module load shpc/0.1.32"
                   echo ""
                   echo "# List available variants"
-                  first_variant=$(echo "$matrix_json" | jq -r '.include[0].values | to_entries | map("-" + .key + "-" + (.value | ascii_downcase)) | join("")')
+                  first_variant=$(echo "$matrix_json" | jq -r '.include[0].values | to_entries | map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) | join("")')
                   first_variant_name="${IMAGE_NAME}${first_variant}"
                   echo "shpc show quay.io/pawsey/${first_variant_name}"
                   echo ""
