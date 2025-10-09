@@ -1528,21 +1528,23 @@ jobs:
 
               # Parse matrix and compute variant_suffix for each variant (lowercase for container compatibility)
               matrix_json='${{ needs.PREPARE-job.outputs.build_matrix }}'
-              echo "$matrix_json" | jq -r '.include[] |
+              while read variant; do
+                echo "- \`${IMAGE_NAME}${variant}_${VERSION}.tar\`"
+              done < <(echo "$matrix_json" | jq -r '.include[] |
                 .values |
                 to_entries |
                 map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                join("") as $suffix |
-                "- `'${IMAGE_NAME}'" + $suffix + "_${VERSION}.tar`"'
+                join("")')
 
               echo ""
               echo "**Singularity SIF Files** (\`s3://${{ vars.ACACIA_SIF_BUCKETNAME }}/\`):"
-              echo "$matrix_json" | jq -r '.include[] |
+              while read variant; do
+                echo "- \`${IMAGE_NAME}${variant}_${VERSION}.sif\`"
+              done < <(echo "$matrix_json" | jq -r '.include[] |
                 .values |
                 to_entries |
                 map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                join("") as $suffix |
-                "- `'${IMAGE_NAME}'" + $suffix + "_${VERSION}.sif`"'
+                join("")')
             else
               echo "| Location | Address | Status |"
               echo "|----------|---------|--------|"
