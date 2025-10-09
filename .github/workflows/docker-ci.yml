@@ -1483,7 +1483,7 @@ jobs:
       VARIANT_COUNT: ${{ needs.PREPARE-job.outputs.variant_count }}
       HAS_TEMPLATE: ${{ needs.PREPARE-job.outputs.has_template }}
     steps:
-      - name: Generate deployment summary
+      - name: Summary - Header
         run: |
           IMAGE_NAME="${MAIN}-${FEATURE}"
 
@@ -1499,17 +1499,25 @@ jobs:
             echo "**Branch:** \`${{ github.ref_name }}\`"
             echo "**Timestamp:** $(date '+%Y-%m-%d %H:%M:%S UTC')"
             echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
 
-            # Template/Variant Information
-            if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
-              echo "## 🔀 Multi-Variant Build"
-              echo ""
-              echo "**Variant Count:** ${{ env.VARIANT_COUNT }}"
-              echo ""
-              echo "Matrix configuration generated ${{ env.VARIANT_COUNT }} build variant(s) based on template parameters."
-              echo ""
-            fi
-            
+      - name: Summary - Variant Information
+        if: env.HAS_TEMPLATE == 'true'
+        run: |
+          {
+            echo "## 🔀 Multi-Variant Build"
+            echo ""
+            echo "**Variant Count:** ${{ env.VARIANT_COUNT }}"
+            echo ""
+            echo "Matrix configuration generated ${{ env.VARIANT_COUNT }} build variant(s) based on template parameters."
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summary - Archive Storage
+        run: |
+          IMAGE_NAME="${MAIN}-${FEATURE}"
+
+          {
             echo "## 📦 Archive Storage"
             echo ""
 
@@ -1553,105 +1561,122 @@ jobs:
                 echo "| S3 Singularity SIF | \`s3://${{ vars.ACACIA_SIF_BUCKETNAME }}/${IMAGE_NAME}_${VERSION}.sif\` | ❌ Failed |"
               fi
             fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
-            echo ""
+      - name: Summary - Registry Deployments (With Template)
+        if: env.HAS_TEMPLATE == 'true'
+        run: |
+          IMAGE_NAME="${MAIN}-${FEATURE}"
+
+          {
             echo "## 🏗️ Container Registry Deployments"
             echo ""
+            echo "> **Note:** Each of the ${{ env.VARIANT_COUNT }} variant(s) has been pushed to the configured registries."
+            echo ""
 
-            if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
-              echo "> **Note:** Each of the ${{ env.VARIANT_COUNT }} variant(s) has been pushed to the configured registries."
+            # Parse configured targets
+            targets='${{ needs.PREPARE-job.outputs.targets }}'
+            private_targets='${{ needs.PREPARE-job.outputs.private_targets }}'
+            private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
+            matrix_json='${{ needs.PREPARE-job.outputs.build_matrix }}'
+
+            # Setonix Private Registry
+            if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
+              echo "### Setonix Private Registry"
               echo ""
+              echo "$matrix_json" | jq -r '.include[] |
+                .values |
+                to_entries |
+                map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
+                join("") as $suffix |
+                "- `setonix-registry.pawsey.org.au/'${private_username}'/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
+              echo ""
+            fi
 
-              # Parse configured targets
-              targets='${{ needs.PREPARE-job.outputs.targets }}'
-              private_targets='${{ needs.PREPARE-job.outputs.private_targets }}'
-              private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
-              matrix_json='${{ needs.PREPARE-job.outputs.build_matrix }}'
+            # Quay.io
+            if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
+              echo "### Quay.io Public Registry"
+              echo ""
+              echo "$matrix_json" | jq -r '.include[] |
+                .values |
+                to_entries |
+                map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
+                join("") as $suffix |
+                "- `quay.io/pawsey/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
+              echo ""
+            fi
 
-              # Setonix Private Registry
-              if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
-                echo "### Setonix Private Registry"
-                echo ""
-                echo "$matrix_json" | jq -r '.include[] |
-                  .values |
-                  to_entries |
-                  map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                  join("") as $suffix |
-                  "- `setonix-registry.pawsey.org.au/'${private_username}'/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
-                echo ""
-              fi
+            # Setonix Public
+            if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
+              echo "### Setonix Public Registry"
+              echo ""
+              echo "$matrix_json" | jq -r '.include[] |
+                .values |
+                to_entries |
+                map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
+                join("") as $suffix |
+                "- `setonix-registry.pawsey.org.au/pawsey/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
+              echo ""
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
-              # Quay.io
-              if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
-                echo "### Quay.io Public Registry"
-                echo ""
-                echo "$matrix_json" | jq -r '.include[] |
-                  .values |
-                  to_entries |
-                  map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                  join("") as $suffix |
-                  "- `quay.io/pawsey/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
-                echo ""
-              fi
+      - name: Summary - Registry Deployments (No Template)
+        if: env.HAS_TEMPLATE != 'true'
+        run: |
+          IMAGE_NAME="${MAIN}-${FEATURE}"
 
-              # Setonix Public
-              if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
-                echo "### Setonix Public Registry"
-                echo ""
-                echo "$matrix_json" | jq -r '.include[] |
-                  .values |
-                  to_entries |
-                  map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                  join("") as $suffix |
-                  "- `setonix-registry.pawsey.org.au/pawsey/'${IMAGE_NAME}'" + $suffix + ":'${VERSION}`"'
-                echo ""
+          {
+            echo "## 🏗️ Container Registry Deployments"
+            echo ""
+            echo "| Registry | Address | Status |"
+            echo "|----------|---------|--------|"
+
+            # Parse configured targets
+            targets='${{ needs.PREPARE-job.outputs.targets }}'
+
+            # Setonix Private Registry (always attempted if credentials available)
+            private_targets='${{ needs.PREPARE-job.outputs.private_targets }}'
+            private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
+            if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ] && [ "${{ needs.PUSH-PRIV-job.result }}" = "success" ]; then
+              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |"
+            elif [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
+              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |"
+            else
+              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ⏭️ Skipped (No credentials) |"
+            fi
+
+            # Quay.io (only if in targets)
+            if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1; then
+              if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && [ "${{ needs.PUSH-PUBLIC-job.result }}" = "success" ]; then
+                echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |"
+              elif [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
+                echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |"
+              else
+                echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Skipped (No credentials) |"
               fi
             else
-              echo "| Registry | Address | Status |"
-              echo "|----------|---------|--------|"
-
-              # Parse configured targets
-              targets='${{ needs.PREPARE-job.outputs.targets }}'
-
-              # Setonix Private Registry (always attempted if credentials available)
-              private_targets='${{ needs.PREPARE-job.outputs.private_targets }}'
-              private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
-              if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ] && [ "${{ needs.PUSH-PRIV-job.result }}" = "success" ]; then
-                echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |"
-              elif [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
-                echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |"
-              else
-                echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ⏭️ Skipped (No credentials) |"
-              fi
-
-
-              # Quay.io (only if in targets)
-              if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1; then
-                if [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ] && [ "${{ needs.PUSH-PUBLIC-job.result }}" = "success" ]; then
-                  echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |"
-                elif [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
-                  echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |"
-                else
-                  echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Skipped (No credentials) |"
-                fi
-              else
-                echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Not in targets |"
-              fi
-
-              # Setonix Public Registry (only if in targets)
-              if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1; then
-                if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ] && [ "${{ needs.PUSH-PUBLIC-job.result }}" = "success" ]; then
-                  echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |"
-                elif [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
-                  echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |"
-                else
-                  echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Skipped (No credentials) |"
-                fi
-              else
-                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Not in targets |"
-              fi
+              echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Not in targets |"
             fi
-            
+
+            # Setonix Public Registry (only if in targets)
+            if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1; then
+              if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ] && [ "${{ needs.PUSH-PUBLIC-job.result }}" = "success" ]; then
+                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |"
+              elif [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
+                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |"
+              else
+                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Skipped (No credentials) |"
+              fi
+            else
+              echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Not in targets |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summary - SHPC Deployment
+        run: |
+          IMAGE_NAME="${MAIN}-${FEATURE}"
+
+          {
             echo ""
             echo "## 🚀 SHPC Container Deployment"
             echo ""
@@ -1717,16 +1742,18 @@ jobs:
                   echo "\`\`\`"
                 fi
               fi
-            fi
-
-            if [ "${{ needs.DEPLOY-job.result }}" = "failure" ]; then
+            elif [ "${{ needs.DEPLOY-job.result }}" = "failure" ]; then
               echo "| SHPC Registry | N/A | ❌ Deployment Failed |"
             elif [ "${{ needs.DEPLOY-job.result }}" = "skipped" ]; then
               echo "| SHPC Registry | N/A | ⏭️ Skipped (shpc=false or Quay.io not available or not in targets) |"
             else
               echo "| SHPC Registry | N/A | ⏸️ Not Executed |"
             fi
-            
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summary - Job Results
+        run: |
+          {
             echo ""
             echo "## 📊 Job Results"
             echo ""
@@ -1738,9 +1765,8 @@ jobs:
             echo "| PUSH-PRIV | ${{ needs.PUSH-PRIV-job.result == 'success' && '✅ Success' || '❌ Failed' }} |"
             echo "| PUSH-PUBLIC | ${{ needs.PUSH-PUBLIC-job.result == 'success' && '✅ Success' || '❌ Failed' }} |"
             echo "| DEPLOY | ${{ needs.DEPLOY-job.result == 'success' && '✅ Success' || (needs.DEPLOY-job.result == 'skipped' && '⏭️ Skipped') || '❌ Failed' }} |"
-            
+
             echo ""
             echo "---"
             echo "*Generated by Image Manager CI/CD Pipeline v2.0.0*"
-            
           } >> "$GITHUB_STEP_SUMMARY"
