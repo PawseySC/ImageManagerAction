@@ -3,7 +3,7 @@
   "feature": "test3",
   "version": "0.0.10",
   "devmode": false,
-  "noscan": false,
+  "noscan": true,
   "platform": "x86",
   "shpc": true,
   "template": {
