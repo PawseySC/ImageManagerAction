@@ -2,7 +2,7 @@
   "main": "ex3",
   "feature": "test3",
   "version": "0.0.10",
-  "devmode": false,
+  "devmode": true,
   "noscan": true,
   "platform": "x86",
   "shpc": true,

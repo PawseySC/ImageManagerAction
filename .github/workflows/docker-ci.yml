@@ -1584,12 +1584,13 @@ jobs:
             if [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
               echo "### Setonix Private Registry"
               echo ""
-              echo "$matrix_json" | jq -r '.include[] |
+              while read variant; do
+                echo "- \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}${variant}:${VERSION}\`"
+              done < <(echo "$matrix_json" | jq -r '.include[] |
                 .values |
                 to_entries |
                 map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                join("") as $suffix |
-                "- \`setonix-registry.pawsey.org.au/'"${private_username}"'/'"${IMAGE_NAME}"'" + $suffix + ":'"${VERSION}"'\`"'
+                join("")')
               echo ""
             fi
 
@@ -1597,12 +1598,13 @@ jobs:
             if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.quayio_available }}" = "true" ]; then
               echo "### Quay.io Public Registry"
               echo ""
-              echo "$matrix_json" | jq -r '.include[] |
+              while read variant; do
+                echo "- \`quay.io/pawsey/${IMAGE_NAME}${variant}:${VERSION}\`"
+              done < <(echo "$matrix_json" | jq -r '.include[] |
                 .values |
                 to_entries |
                 map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                join("") as $suffix |
-                "- \`quay.io/pawsey/'"${IMAGE_NAME}"'" + $suffix + ":'"${VERSION}"'\`"'
+                join("")')
               echo ""
             fi
 
@@ -1610,12 +1612,13 @@ jobs:
             if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1 && [ "${{ needs.PREPARE-job.outputs.setonixreg_available }}" = "true" ]; then
               echo "### Setonix Public Registry"
               echo ""
-              echo "$matrix_json" | jq -r '.include[] |
+              while read variant; do
+                echo "- \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}${variant}:${VERSION}\`"
+              done < <(echo "$matrix_json" | jq -r '.include[] |
                 .values |
                 to_entries |
                 map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                join("") as $suffix |
-                "- \`setonix-registry.pawsey.org.au/pawsey/'"${IMAGE_NAME}"'" + $suffix + ":'"${VERSION}"'\`"'
+                join("")')
               echo ""
             fi
           } >> "$GITHUB_STEP_SUMMARY"
@@ -1693,12 +1696,13 @@ jobs:
                   echo ""
                   echo "**Available Variants:**"
                   matrix_json='${{ needs.PREPARE-job.outputs.build_matrix }}'
-                  echo "$matrix_json" | jq -r '.include[] |
+                  while read variant; do
+                    echo "- \`quay.io/pawsey/${IMAGE_NAME}${variant}:${VERSION}\`"
+                  done < <(echo "$matrix_json" | jq -r '.include[] |
                     .values |
                     to_entries |
                     map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                    join("") as $suffix |
-                    "- \`quay.io/pawsey/'"${IMAGE_NAME}"'" + $suffix + ":'"${VERSION}"'\`"'
+                    join("")')
                   echo ""
                   echo "### SHPC Usage Commands"
                   echo ""
