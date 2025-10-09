@@ -1717,7 +1717,9 @@ jobs:
                   echo "\`\`\`"
                 fi
               fi
-            elif [ "${{ needs.DEPLOY-job.result }}" = "failure" ]; then
+            fi
+
+            if [ "${{ needs.DEPLOY-job.result }}" = "failure" ]; then
               echo "| SHPC Registry | N/A | ❌ Deployment Failed |"
             elif [ "${{ needs.DEPLOY-job.result }}" = "skipped" ]; then
               echo "| SHPC Registry | N/A | ⏭️ Skipped (shpc=false or Quay.io not available or not in targets) |"
