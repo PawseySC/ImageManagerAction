@@ -5,6 +5,7 @@
   "devmode": true,
   "noscan": true,
   "platform": "x86",
+  "shpc": true,
   "template": {
     "DEBIAN_VERSION": [
       "stretch",
@@ -13,8 +14,7 @@
     "CURL_ENABLED": "yes"
   },
   "targets": [
-    "quay.io",
-    "setonix-registry"
+    "quay.io"
   ],
   "private-targets": [
     "liu268"
