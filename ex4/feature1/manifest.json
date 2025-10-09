@@ -1,7 +1,7 @@
 {
   "main": "ex4",
   "feature": "feature1",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "devmode": false,
   "noscan": false,
   "platform": "x86",
@@ -19,8 +19,8 @@
     "path": "ex4/feature1/"
   },
   "metadata": {
-    "timestamp": "2025-10-09T02:44:53.420034Z",
-    "correlation_id": "d423bbb7-3ce7-4538-b5d1-3e7b37d2ed9f"
+    "timestamp": "2025-10-09T03:14:57.894259Z",
+    "correlation_id": "b97bd15b-bcbd-4492-86f2-995e5223addd"
   },
   "template": {
     "DEBIAN_VERSION": [
