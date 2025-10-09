@@ -1,0 +1,32 @@
+{
+  "main": "ex4",
+  "feature": "feature1",
+  "version": "0.0.7",
+  "devmode": false,
+  "noscan": false,
+  "platform": "x86",
+  "shpc": false,
+  "targets": [
+    "quay.io",
+    "setonix-registry"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-ex4/feature1",
+    "path": "ex4/feature1/"
+  },
+  "metadata": {
+    "timestamp": "2025-10-09T02:44:53.420034Z",
+    "correlation_id": "d423bbb7-3ce7-4538-b5d1-3e7b37d2ed9f"
+  },
+  "template": {
+    "DEBIAN_VERSION": [
+      "stretch",
+      "buster"
+    ],
+    "CURL_ENABLED": "no"
+  }
+}
