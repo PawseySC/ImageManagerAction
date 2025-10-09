@@ -1,11 +1,11 @@
 {
   "main": "ex3",
   "feature": "feature2",
-  "version": "0.0.7",
-  "devmode": true,
-  "noscan": true,
+  "version": "0.0.8",
+  "devmode": false,
+  "noscan": false,
   "platform": "x86",
-  "shpc": true,
+  "shpc": false,
   "targets": [
     "quay.io"
   ],
@@ -18,8 +18,8 @@
     "path": "ex3/feature2/"
   },
   "metadata": {
-    "timestamp": "2025-10-09T03:54:36.903907Z",
-    "correlation_id": "36b3c713-14a9-4e9e-87c6-2724f9971dd4"
+    "timestamp": "2025-10-09T03:59:55.440536Z",
+    "correlation_id": "d3435dc6-5a5a-4539-bcdf-fbe5b0374c30"
   },
   "template": {
     "DEBIAN_VERSION": "stretch",

@@ -32,4 +32,4 @@ RUN echo '#!/bin/sh' > /show-info.sh \
  && chmod +x /show-info.sh
 
 CMD ["/show-info.sh"]
-LABEL org.opencontainers.image.version=0.0.7 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.8 org.opencontainers.image.devmode=false org.opencontainers.image.noscan=false org.opencontainers.image.platform=x86
