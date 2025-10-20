@@ -66,4 +66,4 @@ RUN apt-get update -qq \
 # Final settings
 WORKDIR /
 CMD ["/bin/bash"]
-LABEL org.opencontainers.image.version=0.0.4 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=false org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.5 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=false org.opencontainers.image.platform=x86

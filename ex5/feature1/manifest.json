@@ -1,7 +1,7 @@
 {
   "main": "ex5",
   "feature": "feature1",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "devmode": true,
   "noscan": false,
   "platform": "x86",
@@ -16,8 +16,8 @@
     "path": "ex5/feature1/"
   },
   "metadata": {
-    "timestamp": "2025-10-20T05:01:22.867278Z",
-    "correlation_id": "19a17e85-85a8-4421-9b0d-ec0bc93be15e"
+    "timestamp": "2025-10-20T05:26:33.384306Z",
+    "correlation_id": "0a57536d-90c9-4235-b254-5377b091df46"
   },
   "template": {
     "OS_VERSION": "20.04",
