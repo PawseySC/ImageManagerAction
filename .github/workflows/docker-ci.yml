@@ -561,11 +561,30 @@ jobs:
           feature="${{ needs.PREPARE-job.outputs.feature }}"
           version="${{ needs.PREPARE-job.outputs.version }}"
 
-          # Create image name from main, feature and variant suffix
-          # Format: name-variant:version (variant suffix in name, version in tag)
-          base_name="${main}-${feature}"
-          image_name="${base_name}${VARIANT_SUFFIX}"
+          # Function to sanitize Docker tag/name to comply with Docker naming rules
+          # Docker allows: lowercase letters, digits, hyphens, underscores, and periods
+          # Reference: https://docs.docker.com/engine/reference/commandline/tag/
+          sanitize_docker_name() {
+            local input="$1"
+            # Convert to lowercase
+            local sanitized=$(echo "$input" | tr '[:upper:]' '[:lower:]')
+            # Replace spaces and invalid characters with hyphens
+            sanitized=$(echo "$sanitized" | sed 's/[^a-z0-9._-]/-/g')
+            # Remove consecutive hyphens
+            sanitized=$(echo "$sanitized" | sed 's/-\+/-/g')
+            # Remove leading/trailing hyphens or dots
+            sanitized=$(echo "$sanitized" | sed 's/^[.-]*//;s/[.-]*$//')
+            echo "$sanitized"
+          }
+
+          # Create image name from main and feature and sanitize it
+          image_name_raw="${main}-${feature}"
+          image_name=$(sanitize_docker_name "$image_name_raw")
           image_tag="${image_name}:${version}"
+
+          echo "Original image name: $image_name_raw"
+          echo "Sanitized image name: $image_name"
+          echo "Final image tag: $image_tag"
           
           # Set up cache tracking (Podman uses native layer caching)
           IMAGE_CACHE_REF="${main}-${feature}:cache"
