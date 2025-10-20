@@ -1,0 +1,31 @@
+{
+  "main": "ex5",
+  "feature": "feature1",
+  "version": "0.0.4",
+  "devmode": true,
+  "noscan": false,
+  "platform": "x86",
+  "shpc": false,
+  "targets": [],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-ex5/feature1",
+    "path": "ex5/feature1/"
+  },
+  "metadata": {
+    "timestamp": "2025-10-20T05:01:22.867278Z",
+    "correlation_id": "19a17e85-85a8-4421-9b0d-ec0bc93be15e"
+  },
+  "template": {
+    "OS_VERSION": "20.04",
+    "MPI_VERSION": "4.0.2",
+    "MPI_CONFIGURE_OPTIONS": "--enable-fast=all,O3 --prefix=/usr",
+    "MPI_MAKE_OPTIONS": "-j4",
+    "OSU_VERSION": "5.4.2",
+    "OSU_CONFIGURE_OPTIONS": "--prefix=/usr/local CC=mpicc CXX=mpicxx CFLAGS=-O3",
+    "OSU_MAKE_OPTIONS": "-j4"
+  }
+}
