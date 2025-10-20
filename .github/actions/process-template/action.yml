@@ -73,7 +73,7 @@ runs:
 
           # Check if value is array or string
           if echo "$value" | jq -e 'type == "array"' > /dev/null 2>&1; then
-            # It's an array
+            # It's an array - convert to newline-separated list
             values=$(echo "$value" | jq -r '.[]')
           else
             # It's a string, treat as single-element array
@@ -91,13 +91,16 @@ runs:
             old_combinations=$(cat "$combinations_file")
             new_combinations='[]'
 
-            for val in $values; do
+            # Use while read to preserve spaces in values
+            echo "$values" | while IFS= read -r val; do
               expanded=$(echo "$old_combinations" | jq --arg k "$key" --arg v "$val" \
                 'map(. + {($k): $v})')
               new_combinations=$(echo "$new_combinations" "$expanded" | jq -s 'add')
+              echo "$new_combinations" > "$combinations_file.tmp"
+              new_combinations=$(cat "$combinations_file.tmp")
             done
 
-            echo "$new_combinations" > "$combinations_file"
+            mv "$combinations_file.tmp" "$combinations_file"
           fi
         done
 
