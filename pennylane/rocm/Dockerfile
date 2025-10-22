@@ -100,7 +100,9 @@ RUN CMAKE_ARGS="-DKokkos_ENABLE_SERIAL:BOOL=ON \
     -DKokkos_ENABLE_OPENMP:BOOL=ON \
     -DKokkos_ENABLE_HIP:BOOL=ON \
     -DKokkos_ARCH_${AMD_ARCH}=ON \
-    -DCMAKE_CXX_FLAGS='--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}/'" \
+    -DCMAKE_CXX_FLAGS='--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}/' \
+    -DCMAKE_EXE_LINKER_FLAGS='-L/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}' \
+    -DCMAKE_SHARED_LINKER_FLAGS='-L/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}'" \
     ${PYBIN} -m build --wheel
 
 # =========================
@@ -141,4 +143,4 @@ COPY --from=build-wheel-lightning-qubit /opt/pennylane-lightning/dist/ /
 # Install wheels and PennyLane
 RUN pip install --force-reinstall --no-cache-dir pennylane_lightning*.whl && rm pennylane_lightning*.whl
 RUN pip install --no-cache-dir git+https://github.com/PennyLaneAI/pennylane.git@${PENNYLANE_VERSION}
-LABEL org.opencontainers.image.version=0.0.6 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.7 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
