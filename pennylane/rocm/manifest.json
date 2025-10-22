@@ -16,15 +16,15 @@
     "path": "pennylane/rocm/"
   },
   "metadata": {
-    "timestamp": "2025-10-22T22:30:38.386969Z",
-    "correlation_id": "27f26da6-33f5-46bb-8f32-8481f28362ad"
+    "timestamp": "2025-10-22T22:34:33.812683Z",
+    "correlation_id": "32b22282-eb27-4ef7-8bf1-2e4deee0db78"
   },
   "template": {
     "PY_VER": "3.11",
     "PENNYLANE_VERSION": "master",
     "LIGHTNING_VERSION": "master",
     "AMD_ARCH": "AMD_GFX90A",
-    "GCC_HOST_VER": "14",
+    "GCC_HOST_VER": "13",
     "DEBIAN_FRONTEND": "noninteractive"
   }
 }

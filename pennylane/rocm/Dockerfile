@@ -8,7 +8,7 @@ ARG PY_VER=3.11
 ARG PENNYLANE_VERSION=master
 ARG LIGHTNING_VERSION=master
 ARG AMD_ARCH=AMD_GFX90A
-ARG GCC_HOST_VER=14
+ARG GCC_HOST_VER=13
 
 # =========================
 # 1) Build stage (ROCm dev image with compilers and headers)
@@ -42,7 +42,7 @@ RUN apt-get update \
     gcc-${GCC_HOST_VER} g++-${GCC_HOST_VER} \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Set GCC-14 as default compiler
+# Set GCC-13 as default compiler
 RUN update-alternatives \
     --install /usr/bin/gcc gcc /usr/bin/gcc-${GCC_HOST_VER} 100 \
     --slave /usr/bin/g++ g++ /usr/bin/g++-${GCC_HOST_VER} \
