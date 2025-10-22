@@ -1,7 +1,7 @@
 {
   "main": "pennylane",
   "feature": "rocm",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "devmode": true,
   "noscan": true,
   "platform": "x86",
@@ -16,8 +16,8 @@
     "path": "pennylane/rocm/"
   },
   "metadata": {
-    "timestamp": "2025-10-22T23:40:13.247851Z",
-    "correlation_id": "b9244863-c2ba-4694-906b-88c0da0bfaea"
+    "timestamp": "2025-10-22T23:43:47.629025Z",
+    "correlation_id": "3206fbcc-b910-4546-8f1b-d19eaa766a31"
   },
   "template": {
     "PY_VER": "3.11",
