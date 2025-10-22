@@ -93,16 +93,15 @@ ENV CXX=hipcc
 ENV PL_BACKEND=lightning_kokkos
 
 # Build Kokkos-HIP wheel with selected AMD arch and OpenMP enabled
-# Following official Dockerfile format with multiline CMAKE_ARGS
+# Set hipcc environment variables to handle GCC-13 paths for both compile and link stages
 RUN ${PIP} uninstall -y pennylane-lightning
 RUN ${PYBIN} scripts/configure_pyproject_toml.py || true
-RUN CMAKE_ARGS="-DKokkos_ENABLE_SERIAL:BOOL=ON \
+RUN HIPCXXFLAGS="--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}/" \
+    HIPLDFLAGS="--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}/ -L/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}" \
+    CMAKE_ARGS="-DKokkos_ENABLE_SERIAL:BOOL=ON \
     -DKokkos_ENABLE_OPENMP:BOOL=ON \
     -DKokkos_ENABLE_HIP:BOOL=ON \
-    -DKokkos_ARCH_${AMD_ARCH}=ON \
-    -DCMAKE_CXX_FLAGS='--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}/' \
-    -DCMAKE_EXE_LINKER_FLAGS='-L/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}' \
-    -DCMAKE_SHARED_LINKER_FLAGS='-L/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}'" \
+    -DKokkos_ARCH_${AMD_ARCH}=ON" \
     ${PYBIN} -m build --wheel
 
 # =========================
@@ -143,4 +142,4 @@ COPY --from=build-wheel-lightning-qubit /opt/pennylane-lightning/dist/ /
 # Install wheels and PennyLane
 RUN pip install --force-reinstall --no-cache-dir pennylane_lightning*.whl && rm pennylane_lightning*.whl
 RUN pip install --no-cache-dir git+https://github.com/PennyLaneAI/pennylane.git@${PENNYLANE_VERSION}
-LABEL org.opencontainers.image.version=0.0.7 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
