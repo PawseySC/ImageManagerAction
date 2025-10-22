@@ -92,69 +92,53 @@ ENV CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH}
 ENV CXX=hipcc
 ENV PL_BACKEND=lightning_kokkos
 
-RUN ${PIP} uninstall -y pennylane-lightning || true
-RUN ${PYBIN} scripts/configure_pyproject_toml.py || true
-
 # Build Kokkos-HIP wheel with selected AMD arch and OpenMP enabled
-# Use python -m build which automatically installs dependencies (scipy, numpy, etc.)
-# Pass CMAKE_ARGS to control the build configuration
-RUN set -e && \
-    GCC_TOOLCHAIN_PATH="/usr" && \
-    LIBSTDCXX_PATH="/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}" && \
-    CLANG_SCAN_DEPS="/opt/rocm-6.4.1/lib/llvm/bin/clang-scan-deps" && \
-    echo "=== Build Configuration ===" && \
-    echo "Using GCC version: $(gcc --version | head -n1)" && \
-    echo "GCC_TOOLCHAIN_PATH: ${GCC_TOOLCHAIN_PATH}" && \
-    echo "LIBSTDCXX_PATH: ${LIBSTDCXX_PATH}" && \
-    echo "CLANG_SCAN_DEPS: ${CLANG_SCAN_DEPS}" && \
-    echo "AMD_ARCH: ${AMD_ARCH}" && \
-    echo "=========================" && \
-    CMAKE_ARGS="-DKokkos_ENABLE_SERIAL:BOOL=ON -DKokkos_ENABLE_OPENMP:BOOL=ON -DKokkos_ENABLE_HIP:BOOL=ON -DKokkos_ARCH_${AMD_ARCH}=ON -DCMAKE_CXX_FLAGS=--gcc-toolchain=${GCC_TOOLCHAIN_PATH} -DCMAKE_EXE_LINKER_FLAGS=--gcc-toolchain=${GCC_TOOLCHAIN_PATH};-L${LIBSTDCXX_PATH} -DCMAKE_SHARED_LINKER_FLAGS=--gcc-toolchain=${GCC_TOOLCHAIN_PATH};-L${LIBSTDCXX_PATH} -DCMAKE_CXX_COMPILER_CLANG_SCAN_DEPS:FILEPATH=${CLANG_SCAN_DEPS}" \
+# Following official Dockerfile format with multiline CMAKE_ARGS
+RUN ${PIP} uninstall -y pennylane-lightning
+RUN ${PYBIN} scripts/configure_pyproject_toml.py || true
+RUN CMAKE_ARGS="-DKokkos_ENABLE_SERIAL:BOOL=ON \
+    -DKokkos_ENABLE_OPENMP:BOOL=ON \
+    -DKokkos_ENABLE_HIP:BOOL=ON \
+    -DKokkos_ARCH_${AMD_ARCH}=ON \
+    -DCMAKE_CXX_FLAGS='--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}/'" \
     ${PYBIN} -m build --wheel
 
 # =========================
-# 4) Runtime stage
-#    - Lean ROCm runtime with both wheels installed
-#    - Installs PennyLane at requested branch/tag
-#    - Keeps a clean venv ready for use
+# 4) Runtime stage - Install lightning-kokkos HIP backend
+#    Following official Dockerfile format
 # =========================
 FROM docker.io/rocm/dev-ubuntu-22.04:6.4.1-complete AS runtime
 
 ARG PY_VER
 ARG PENNYLANE_VERSION
-ARG DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
 ENV PYBIN=python${PY_VER}
-ENV PIP=pip
 
-# Minimal runtime deps + chosen Python
+# Minimal runtime dependencies + Python
 RUN apt-get update \
- && apt-get install --no-install-recommends -y \
-    software-properties-common gnupg ca-certificates git \
- && add-apt-repository ppa:deadsnakes/ppa -y \
- && apt-get update \
- && apt-get install --no-install-recommends -y \
-    ${PYBIN} ${PYBIN}-venv python3-pip libgomp1 \
- && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get install --no-install-recommends -y \
+    software-properties-common \
+    git \
+    libgomp1 \
+    python3-pip \
+    && add-apt-repository ppa:deadsnakes/ppa -y \
+    && apt-get update \
+    && apt-get install --no-install-recommends -y \
+    ${PYBIN} \
+    ${PYBIN}-venv \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Runtime venv
+# Create and activate virtual environment
 ENV VIRTUAL_ENV=/opt/venv
 RUN ${PYBIN} -m venv ${VIRTUAL_ENV}
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
-# Copy wheels built in previous stages and install
-COPY --from=build-wheel-lightning-qubit /opt/pennylane-lightning/dist/ /tmp/dist-qubit/
-COPY --from=build-wheel-lightning-kokkos-hip /opt/pennylane-lightning/dist/ /tmp/dist-kokkos/
+# Copy wheels from build stages
+COPY --from=build-wheel-lightning-kokkos-hip /opt/pennylane-lightning/dist/ /
+COPY --from=build-wheel-lightning-qubit /opt/pennylane-lightning/dist/ /
 
-# Install: lightning-qubit first, then lightning-kokkos
-RUN ${PIP} install --no-cache-dir --upgrade pip \
- && ${PIP} install --no-cache-dir /tmp/dist-qubit/pennylane_lightning*.whl \
- && ${PIP} install --no-cache-dir /tmp/dist-kokkos/pennylane_lightning*.whl \
- && rm -rf /tmp/dist-qubit /tmp/dist-kokkos
-
-# Install PennyLane (match your requested revision)
-RUN ${PIP} install --no-cache-dir "git+https://github.com/PennyLaneAI/pennylane.git@${PENNYLANE_VERSION}"
-
-# Convenience: working dir + a smoke test on container start (can be overridden)
-WORKDIR /workspace
-CMD ${PYBIN} -c "import pennylane as qml; print('PennyLane:', qml.__version__); dev= qml.device('lightning.kokkos', wires=2); print('Backend OK:', dev.name)"
-LABEL org.opencontainers.image.version=0.0.5 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+# Install wheels and PennyLane
+RUN pip install --force-reinstall --no-cache-dir pennylane_lightning*.whl && rm pennylane_lightning*.whl
+RUN pip install --no-cache-dir git+https://github.com/PennyLaneAI/pennylane.git@${PENNYLANE_VERSION}
+LABEL org.opencontainers.image.version=0.0.6 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
