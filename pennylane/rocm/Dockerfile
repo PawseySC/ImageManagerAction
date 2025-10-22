@@ -50,9 +50,8 @@ RUN ${PIP} install --no-cache-dir --upgrade pip \
  && ${PIP} install --no-cache-dir build cmake ninja wheel setuptools>=75.8.1 toml
 
 # Fetch pennylane-lightning sources at requested branch/tag
+RUN git clone --depth 1 --branch ${LIGHTNING_VERSION} https://github.com/PennyLaneAI/pennylane-lightning.git /opt/pennylane-lightning
 WORKDIR /opt/pennylane-lightning
-RUN git clone --depth 1 --branch ${LIGHTNING_VERSION} https://github.com/PennyLaneAI/pennylane-lightning.git /tmp/pl \
- && rsync -a --remove-source-files /tmp/pl/ . && rmdir /tmp/pl
 
 # This script updates pyproject for backend toggles (tolerate absence on old revs)
 RUN ${PYBIN} scripts/configure_pyproject_toml.py || true
