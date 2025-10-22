@@ -96,16 +96,18 @@ RUN ${PIP} uninstall -y pennylane-lightning || true
 RUN ${PYBIN} scripts/configure_pyproject_toml.py || true
 
 # Build Kokkos-HIP wheel with selected AMD arch and OpenMP enabled
-# Note: --gcc-install-dir path must point to the GCC installation directory including version
-# We dynamically detect the GCC installation directory to ensure hipcc uses the correct host compiler
+# Note: Use --gcc-toolchain for Ubuntu (more robust than --gcc-install-dir)
+# Also set clang-scan-deps as recommended in PennyLane documentation
 RUN set -e && \
-    GCC_INSTALL_DIR="$(dirname "$(gcc -print-libgcc-file-name)")" && \
+    GCC_TOOLCHAIN_PATH="/usr" && \
+    CLANG_SCAN_DEPS="/opt/rocm-6.4.1/lib/llvm/bin/clang-scan-deps" && \
     echo "=== Build Configuration ===" && \
     echo "Using GCC version: $(gcc --version | head -n1)" && \
-    echo "GCC_INSTALL_DIR: ${GCC_INSTALL_DIR}" && \
+    echo "GCC_TOOLCHAIN_PATH: ${GCC_TOOLCHAIN_PATH}" && \
+    echo "CLANG_SCAN_DEPS: ${CLANG_SCAN_DEPS}" && \
     echo "AMD_ARCH: ${AMD_ARCH}" && \
     echo "=========================" && \
-    export CMAKE_ARGS="-DKokkos_ENABLE_SERIAL:BOOL=ON -DKokkos_ENABLE_OPENMP:BOOL=ON -DKokkos_ENABLE_HIP:BOOL=ON -DKokkos_ARCH_${AMD_ARCH}=ON -DCMAKE_CXX_FLAGS=--gcc-install-dir=${GCC_INSTALL_DIR}" && \
+    export CMAKE_ARGS="-DKokkos_ENABLE_SERIAL:BOOL=ON -DKokkos_ENABLE_OPENMP:BOOL=ON -DKokkos_ENABLE_HIP:BOOL=ON -DKokkos_ARCH_${AMD_ARCH}=ON -DCMAKE_CXX_FLAGS=--gcc-toolchain=${GCC_TOOLCHAIN_PATH} -DCMAKE_CXX_COMPILER_CLANG_SCAN_DEPS:FILEPATH=${CLANG_SCAN_DEPS}" && \
     echo "CMAKE_ARGS: ${CMAKE_ARGS}" && \
     ${PYBIN} -m build --wheel
 

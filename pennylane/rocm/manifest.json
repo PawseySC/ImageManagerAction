@@ -16,8 +16,8 @@
     "path": "pennylane/rocm/"
   },
   "metadata": {
-    "timestamp": "2025-10-22T22:34:33.812683Z",
-    "correlation_id": "32b22282-eb27-4ef7-8bf1-2e4deee0db78"
+    "timestamp": "2025-10-22T22:58:41.272285Z",
+    "correlation_id": "19c7f2fd-6c2c-4db6-9854-c760b971d935"
   },
   "template": {
     "PY_VER": "3.11",
