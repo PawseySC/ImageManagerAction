@@ -38,6 +38,9 @@ RUN apt-get update \
  && apt-get install --no-install-recommends -y \
     ${PYBIN} ${PYBIN}-venv ${PYBIN}-dev python3-pip \
     build-essential cmake ninja-build libgomp1 \
+    gcc-${GCC_HOST_VER} g++-${GCC_HOST_VER} \
+ && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${GCC_HOST_VER} 100 \
+ && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-${GCC_HOST_VER} 100 \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Build venv (isolates Python toolchain and wheels)
@@ -90,7 +93,9 @@ RUN ${PYBIN} scripts/configure_pyproject_toml.py || true
 # Build Kokkos-HIP wheel with selected AMD arch and OpenMP enabled
 # Note: --gcc-install-dir path matches Ubuntu 22.04 x86_64 GCC layout.
 # We dynamically detect the GCC installation directory to ensure hipcc uses the correct host compiler
-RUN GCC_INSTALL_DIR="$(dirname "$(dirname "$(gcc -print-libgcc-file-name)")")" && \
+# Explicitly use the GCC version specified by GCC_HOST_VER
+RUN GCC_INSTALL_DIR="$(dirname "$(gcc -print-libgcc-file-name)")" && \
+    echo "Using GCC version: $(gcc --version | head -n1)" && \
     echo "GCC_INSTALL_DIR: ${GCC_INSTALL_DIR}" && \
     CMAKE_ARGS="-DKokkos_ENABLE_SERIAL:BOOL=ON \
                 -DKokkos_ENABLE_OPENMP:BOOL=ON \
@@ -144,4 +149,4 @@ RUN ${PIP} install --no-cache-dir "git+https://github.com/PennyLaneAI/pennylane.
 # Convenience: working dir + a smoke test on container start (can be overridden)
 WORKDIR /workspace
 CMD ${PYBIN} -c "import pennylane as qml; print('PennyLane:', qml.__version__); dev= qml.device('lightning.kokkos', wires=2); print('Backend OK:', dev.name)"
-LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=false org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
