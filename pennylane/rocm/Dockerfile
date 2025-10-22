@@ -96,8 +96,8 @@ RUN ${PIP} uninstall -y pennylane-lightning || true
 RUN ${PYBIN} scripts/configure_pyproject_toml.py || true
 
 # Build Kokkos-HIP wheel with selected AMD arch and OpenMP enabled
-# Note: Must set --gcc-toolchain for both compile AND link stages to avoid libstdc++ linking errors
-# Also set clang-scan-deps as recommended in PennyLane documentation
+# Note: Use direct cmake approach for better control and clarity
+# Configure, build with cmake, then create wheel with pip
 RUN set -e && \
     GCC_TOOLCHAIN_PATH="/usr" && \
     LIBSTDCXX_PATH="/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}" && \
@@ -109,9 +109,20 @@ RUN set -e && \
     echo "CLANG_SCAN_DEPS: ${CLANG_SCAN_DEPS}" && \
     echo "AMD_ARCH: ${AMD_ARCH}" && \
     echo "=========================" && \
-    export CMAKE_ARGS="-DKokkos_ENABLE_SERIAL:BOOL=ON -DKokkos_ENABLE_OPENMP:BOOL=ON -DKokkos_ENABLE_HIP:BOOL=ON -DKokkos_ARCH_${AMD_ARCH}=ON -DCMAKE_CXX_FLAGS=\"--gcc-toolchain=${GCC_TOOLCHAIN_PATH}\" -DCMAKE_EXE_LINKER_FLAGS=\"--gcc-toolchain=${GCC_TOOLCHAIN_PATH} -L${LIBSTDCXX_PATH}\" -DCMAKE_SHARED_LINKER_FLAGS=\"--gcc-toolchain=${GCC_TOOLCHAIN_PATH} -L${LIBSTDCXX_PATH}\" -DCMAKE_CXX_COMPILER_CLANG_SCAN_DEPS:FILEPATH=${CLANG_SCAN_DEPS}" && \
-    echo "CMAKE_ARGS: ${CMAKE_ARGS}" && \
-    ${PYBIN} -m build --wheel
+    cmake -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DPL_BACKEND=lightning_kokkos \
+        -DENABLE_WARNINGS=OFF \
+        -DKokkos_ENABLE_SERIAL:BOOL=ON \
+        -DKokkos_ENABLE_OPENMP:BOOL=ON \
+        -DKokkos_ENABLE_HIP:BOOL=ON \
+        -DKokkos_ARCH_${AMD_ARCH}=ON \
+        -DCMAKE_CXX_FLAGS="--gcc-toolchain=${GCC_TOOLCHAIN_PATH}" \
+        -DCMAKE_EXE_LINKER_FLAGS="--gcc-toolchain=${GCC_TOOLCHAIN_PATH} -L${LIBSTDCXX_PATH}" \
+        -DCMAKE_SHARED_LINKER_FLAGS="--gcc-toolchain=${GCC_TOOLCHAIN_PATH} -L${LIBSTDCXX_PATH}" \
+        -DCMAKE_CXX_COMPILER_CLANG_SCAN_DEPS:FILEPATH=${CLANG_SCAN_DEPS} && \
+    cmake --build build --parallel && \
+    ${PIP} wheel --no-deps --wheel-dir dist .
 
 # =========================
 # 4) Runtime stage
@@ -158,4 +169,4 @@ RUN ${PIP} install --no-cache-dir "git+https://github.com/PennyLaneAI/pennylane.
 # Convenience: working dir + a smoke test on container start (can be overridden)
 WORKDIR /workspace
 CMD ${PYBIN} -c "import pennylane as qml; print('PennyLane:', qml.__version__); dev= qml.device('lightning.kokkos', wires=2); print('Backend OK:', dev.name)"
-LABEL org.opencontainers.image.version=0.0.2 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.3 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
