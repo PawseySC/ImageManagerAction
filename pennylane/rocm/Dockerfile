@@ -154,4 +154,4 @@ RUN ${PIP} install --no-cache-dir "git+https://github.com/PennyLaneAI/pennylane.
 # Convenience: working dir + a smoke test on container start (can be overridden)
 WORKDIR /workspace
 CMD ${PYBIN} -c "import pennylane as qml; print('PennyLane:', qml.__version__); dev= qml.device('lightning.kokkos', wires=2); print('Backend OK:', dev.name)"
-LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=false org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
