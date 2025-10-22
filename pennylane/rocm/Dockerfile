@@ -8,7 +8,7 @@ ARG PY_VER=3.11
 ARG PENNYLANE_VERSION=master
 ARG LIGHTNING_VERSION=master
 ARG AMD_ARCH=AMD_GFX90A
-ARG GCC_HOST_VER=13
+ARG GCC_HOST_VER=11
 
 # =========================
 # 1) Build stage (ROCm dev image with compilers and headers)
@@ -42,7 +42,7 @@ RUN apt-get update \
     gcc-${GCC_HOST_VER} g++-${GCC_HOST_VER} \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Set GCC-13 as default compiler
+# Set GCC-11 as default compiler
 RUN update-alternatives \
     --install /usr/bin/gcc gcc /usr/bin/gcc-${GCC_HOST_VER} 100 \
     --slave /usr/bin/g++ g++ /usr/bin/g++-${GCC_HOST_VER} \
@@ -93,16 +93,14 @@ ENV CXX=hipcc
 ENV PL_BACKEND=lightning_kokkos
 
 # Build Kokkos-HIP wheel with selected AMD arch and OpenMP enabled
-# Add explicit libstdc++ linking to resolve device-side linker issues with GCC-13
+# Following official Dockerfile format exactly (using GCC-11)
 RUN ${PIP} uninstall -y pennylane-lightning
 RUN ${PYBIN} scripts/configure_pyproject_toml.py || true
 RUN CMAKE_ARGS="-DKokkos_ENABLE_SERIAL:BOOL=ON \
     -DKokkos_ENABLE_OPENMP:BOOL=ON \
     -DKokkos_ENABLE_HIP:BOOL=ON \
     -DKokkos_ARCH_${AMD_ARCH}=ON \
-    -DCMAKE_CXX_FLAGS='--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}/' \
-    -DCMAKE_EXE_LINKER_FLAGS='-L/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER} -lstdc++' \
-    -DCMAKE_SHARED_LINKER_FLAGS='-L/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER} -lstdc++'" \
+    -DCMAKE_CXX_FLAGS='--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_HOST_VER}/'" \
     ${PYBIN} -m build --wheel
 
 # =========================
@@ -143,4 +141,4 @@ COPY --from=build-wheel-lightning-qubit /opt/pennylane-lightning/dist/ /
 # Install wheels and PennyLane
 RUN pip install --force-reinstall --no-cache-dir pennylane_lightning*.whl && rm pennylane_lightning*.whl
 RUN pip install --no-cache-dir git+https://github.com/PennyLaneAI/pennylane.git@${PENNYLANE_VERSION}
-LABEL org.opencontainers.image.version=0.0.2 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.3 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
