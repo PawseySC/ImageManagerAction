@@ -109,7 +109,7 @@ RUN set -e && \
     echo "CLANG_SCAN_DEPS: ${CLANG_SCAN_DEPS}" && \
     echo "AMD_ARCH: ${AMD_ARCH}" && \
     echo "=========================" && \
-    CMAKE_ARGS="-DKokkos_ENABLE_SERIAL:BOOL=ON -DKokkos_ENABLE_OPENMP:BOOL=ON -DKokkos_ENABLE_HIP:BOOL=ON -DKokkos_ARCH_${AMD_ARCH}=ON -DCMAKE_CXX_FLAGS='--gcc-toolchain=${GCC_TOOLCHAIN_PATH}' -DCMAKE_EXE_LINKER_FLAGS='--gcc-toolchain=${GCC_TOOLCHAIN_PATH} -L${LIBSTDCXX_PATH}' -DCMAKE_SHARED_LINKER_FLAGS='--gcc-toolchain=${GCC_TOOLCHAIN_PATH} -L${LIBSTDCXX_PATH}' -DCMAKE_CXX_COMPILER_CLANG_SCAN_DEPS:FILEPATH=${CLANG_SCAN_DEPS}" \
+    CMAKE_ARGS="-DKokkos_ENABLE_SERIAL:BOOL=ON -DKokkos_ENABLE_OPENMP:BOOL=ON -DKokkos_ENABLE_HIP:BOOL=ON -DKokkos_ARCH_${AMD_ARCH}=ON -DCMAKE_CXX_FLAGS=--gcc-toolchain=${GCC_TOOLCHAIN_PATH} -DCMAKE_EXE_LINKER_FLAGS=--gcc-toolchain=${GCC_TOOLCHAIN_PATH};-L${LIBSTDCXX_PATH} -DCMAKE_SHARED_LINKER_FLAGS=--gcc-toolchain=${GCC_TOOLCHAIN_PATH};-L${LIBSTDCXX_PATH} -DCMAKE_CXX_COMPILER_CLANG_SCAN_DEPS:FILEPATH=${CLANG_SCAN_DEPS}" \
     ${PYBIN} -m build --wheel
 
 # =========================
@@ -157,4 +157,4 @@ RUN ${PIP} install --no-cache-dir "git+https://github.com/PennyLaneAI/pennylane.
 # Convenience: working dir + a smoke test on container start (can be overridden)
 WORKDIR /workspace
 CMD ${PYBIN} -c "import pennylane as qml; print('PennyLane:', qml.__version__); dev= qml.device('lightning.kokkos', wires=2); print('Backend OK:', dev.name)"
-LABEL org.opencontainers.image.version=0.0.4 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.5 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
