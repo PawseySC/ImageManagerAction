@@ -16,7 +16,7 @@ ARG GCC_HOST_VER=14
 #    - HIP/ROCm 6.2.4 toolchain present
 #    - Installs Python ${PY_VER}, venv, build toolchain
 # =========================
-FROM rocm/dev-ubuntu-22.04:6.4.1-complete AS build-base
+FROM docker.io/rocm/dev-ubuntu-22.04:6.4.1-complete AS build-base
 
 ARG PY_VER
 ARG PENNYLANE_VERSION
@@ -106,7 +106,7 @@ RUN GCC_INSTALL_DIR="$(dirname "$(dirname "$(gcc -print-libgcc-file-name)")")" &
 #    - Installs PennyLane at requested branch/tag
 #    - Keeps a clean venv ready for use
 # =========================
-FROM rocm/dev-ubuntu-22.04:6.4.1-complete AS runtime
+FROM docker.io/rocm/dev-ubuntu-22.04:6.4.1-complete AS runtime
 
 ARG PY_VER
 ARG PENNYLANE_VERSION
@@ -145,4 +145,4 @@ RUN ${PIP} install --no-cache-dir "git+https://github.com/PennyLaneAI/pennylane.
 # Convenience: working dir + a smoke test on container start (can be overridden)
 WORKDIR /workspace
 CMD ${PYBIN} -c "import pennylane as qml; print('PennyLane:', qml.__version__); dev= qml.device('lightning.kokkos', wires=2); print('Backend OK:', dev.name)"
-LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=false org.opencontainers.image.platform=x86
