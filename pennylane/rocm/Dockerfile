@@ -16,7 +16,7 @@ ARG GCC_HOST_VER=11
 #    - HIP/ROCm 6.2.4 toolchain present
 #    - Installs Python ${PY_VER}, venv, build toolchain
 # =========================
-FROM docker.io/rocm/dev-ubuntu-22.04:6.4.1-complete AS build-base
+FROM docker.io/rocm/rocm-build-ubuntu-24.04:6.4.1-complete AS build-base
 
 ARG PY_VER
 ARG PENNYLANE_VERSION
@@ -141,4 +141,4 @@ COPY --from=build-wheel-lightning-qubit /opt/pennylane-lightning/dist/ /
 # Install wheels and PennyLane
 RUN pip install --force-reinstall --no-cache-dir pennylane_lightning*.whl && rm pennylane_lightning*.whl
 RUN pip install --no-cache-dir git+https://github.com/PennyLaneAI/pennylane.git@${PENNYLANE_VERSION}
-LABEL org.opencontainers.image.version=0.0.4 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.5 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
