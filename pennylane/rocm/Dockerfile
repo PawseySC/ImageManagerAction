@@ -107,7 +107,7 @@ RUN CMAKE_ARGS="-DKokkos_ENABLE_SERIAL:BOOL=ON \
 # 4) Runtime stage - Install lightning-kokkos HIP backend
 #    Following official Dockerfile format
 # =========================
-FROM docker.io/rocm/dev-ubuntu-22.04:6.4.1-complete AS runtime
+FROM quay.io/pawsey/rocm-mpich-base:rocm6.4.1-mpich3.4.3-ubuntu24.04 AS runtime
 
 ARG PY_VER
 ARG PENNYLANE_VERSION
@@ -141,4 +141,4 @@ COPY --from=build-wheel-lightning-qubit /opt/pennylane-lightning/dist/ /
 # Install wheels and PennyLane
 RUN pip install --force-reinstall --no-cache-dir pennylane_lightning*.whl && rm pennylane_lightning*.whl
 RUN pip install --no-cache-dir git+https://github.com/PennyLaneAI/pennylane.git@${PENNYLANE_VERSION}
-LABEL org.opencontainers.image.version=0.0.7 org.opencontainers.image.devmode=false org.opencontainers.image.noscan=false org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.8 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
