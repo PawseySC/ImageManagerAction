@@ -1,7 +1,7 @@
 {
   "main": "mpi",
   "feature": "rocm-mpich-base",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "devmode": true,
   "noscan": true,
   "platform": "x86",
@@ -16,22 +16,18 @@
     "path": "mpi/rocm-mpich-base/"
   },
   "metadata": {
-    "timestamp": "2025-10-24T01:20:38.206080Z",
-    "correlation_id": "b36a7793-1f48-446a-a90b-64930c9c7d86"
+    "timestamp": "2025-10-24T01:59:41.751588Z",
+    "correlation_id": "f22d60b8-d592-4ac1-bcc9-c7b32cceacd9"
   },
   "template": {
     "OS_VERSION": "24.04",
+    "LINUX_KERNEL": "6.8.0-31",
     "LIBFABRIC_VERSION": "1.18.1",
     "MPICH_VERSION": "3.4.3",
     "MPI4PY_VERSION": "3.1.5",
-    "LUSTRE_TAG": "v2_15_0",
     "ROCM_VERSION": "6.4.1",
-    "ENABLE_OSU": "0",
+    "ENABLE_OSU": "1",
     "GFX_ARCH": "gfx90a",
-    "LIBFABRIC_PREFIX": "/opt/libfabric",
-    "MPICH_PREFIX": "/opt/mpich",
-    "AWS_OFI_RCCL_PREFIX": "/opt/aws-ofi-rccl",
-    "OSU_VERSION": "7.3",
-    "OSU_PREFIX": "/opt/osu"
+    "OSU_VERSION": "7.3"
   }
 }
