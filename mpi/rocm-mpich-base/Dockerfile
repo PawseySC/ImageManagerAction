@@ -32,7 +32,7 @@ RUN set -e; \
   done
 
 # Build userspace (liblustreapi + utils) only
-RUN ./autogen.sh \
+RUN bash autogen.sh \
  && ./configure --prefix=/opt/lustre \
       --disable-server --disable-tests --disable-modules \
       --without-ldiskfs --without-zfs \
@@ -199,4 +199,4 @@ RUN mkdir -p /.singularity.d/env/ && \
     echo "export FI_CXI_DISABLE_CQ_HUGETLB=1"         >> /.singularity.d/env/91-environment.sh
 
 WORKDIR /workspace
-LABEL org.opencontainers.image.version=0.0.7 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.8 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
