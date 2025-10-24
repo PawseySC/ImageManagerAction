@@ -116,21 +116,24 @@ RUN if [ "${ENABLE_OSU}" = "1" ]; then \
       make -j"$(nproc)" && make install-strip ; \
     fi
 
-# ====================== Stage 3: Runtime (slim) ======================
+# ====================== Stage 3: Runtime (slim, bash shell) ======================
 FROM ubuntu:${OS_VERSION} AS runtime
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Minimal runtime dependencies
+# ---- Minimal runtime deps ----
 RUN set -e \
  && apt-get update -qq \
  && apt-get install -y --no-install-recommends \
+      bash ca-certificates wget gnupg lsb-release \
       libnuma1 libgfortran5 libgcc-s1 libstdc++6 \
       libyaml-0-2 keyutils \
       python3 python3-pip python3-venv \
-      rsync ca-certificates tzdata gnupg wget \
+      rsync tzdata \
  && rm -rf /var/lib/apt/lists/*
 
-# Install ROCm 6.4.1 HIP runtime (noble) - no DKMS, noninteractive
+# ---- ROCm 6.4.1 HIP runtime installation ----
 ARG ROCM_VERSION
 RUN set -e \
  && apt-get update -qq \
@@ -141,36 +144,36 @@ RUN set -e \
  && dpkg -i "/tmp/${ROCM_DEB}" || true \
  && apt-get -f install -y \
  && dpkg -i "/tmp/${ROCM_DEB}" \
- && /usr/bin/amdgpu-install -y --usecase=rocm,hip-runtime --no-dkms \
+ && mkdir -p /var/cache/apt/archives/partial \
+ && amdgpu-install -y --usecase=rocm,hip-runtime --no-dkms \
  && rm -f "/tmp/${ROCM_DEB}" \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /root/.cache
 
-
-# Copy runtime artifacts only (no headers/dev files)
+# ---- Copy runtime libraries ----
 COPY --from=lustre-builder /opt/lustre/lib/liblustreapi.so* /opt/lustre/lib/
 COPY --from=core-builder   /opt/libfabric /opt/libfabric
 COPY --from=core-builder   /opt/mpich    /opt/mpich
 COPY --from=core-builder   /opt/aws-ofi-rccl /opt/aws-ofi-rccl
 COPY --from=core-builder   /opt/osu      /opt/osu
 
-# Runtime paths
+# ---- Environment paths ----
 ENV PATH=/opt/mpich/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/lustre/lib:/opt/libfabric/lib:/opt/mpich/lib:/opt/aws-ofi-rccl/lib:$LD_LIBRARY_PATH
 
-# Add OSU tools to PATH if present
+# ---- OSU benchmark PATH (if available) ----
 RUN if [ -d /opt/osu/libexec/osu-micro-benchmarks/mpi/pt2pt ]; then \
       echo 'export PATH=/opt/osu/libexec/osu-micro-benchmarks/mpi/pt2pt:/opt/osu/libexec/osu-micro-benchmarks/mpi/collective:$PATH' >> /etc/profile.d/90-osu.sh ; \
     fi
 
-# mpi4py (no cache)
+# ---- mpi4py ----
 ARG MPI4PY_VERSION
 RUN pip install --no-cache-dir mpi4py==${MPI4PY_VERSION}
 
-# Trim docs/locales
+# ---- Cleanup docs/locales ----
 RUN rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* || true
 
-# Environment (kept from your original)
+# ---- Environment variables ----
 ENV NCCL_SOCKET_IFNAME=hsn \
     CXI_FORK_SAFE=1 \
     CXI_FORK_SAFE_HP=1 \
@@ -178,12 +181,12 @@ ENV NCCL_SOCKET_IFNAME=hsn \
     FI_CXI_DISABLE_CQ_HUGETLB=1 \
     ROCM_PATH=/opt/rocm
 
-# GPU arch shims for non-GPU build hosts
+# ---- GPU arch shim for non-GPU hosts ----
 ARG GFX_ARCH
-RUN printf '#!/bin/sh\necho %s\n' "${GFX_ARCH}" > /usr/local/bin/amdgpu-arch && chmod +x /usr/local/bin/amdgpu-arch && \
-    printf '#!/bin/sh\necho %s\n' "${GFX_ARCH}" > /usr/local/bin/rocm_agent_enumerator && chmod +x /usr/local/bin/rocm_agent_enumerator
+RUN printf '#!/bin/bash\necho %s\n' "${GFX_ARCH}" > /usr/local/bin/amdgpu-arch && chmod +x /usr/local/bin/amdgpu-arch && \
+    printf '#!/bin/bash\necho %s\n' "${GFX_ARCH}" > /usr/local/bin/rocm_agent_enumerator && chmod +x /usr/local/bin/rocm_agent_enumerator
 
-# Singularity env (same behavior)
+# ---- Singularity env injection ----
 RUN mkdir -p /.singularity.d/env/ && \
     echo "export NCCL_SOCKET_IFNAME=hsn"              >> /.singularity.d/env/91-environment.sh && \
     echo "export CXI_FORK_SAFE=1"                     >> /.singularity.d/env/91-environment.sh && \
@@ -193,4 +196,4 @@ RUN mkdir -p /.singularity.d/env/ && \
     echo "export FI_CXI_DISABLE_CQ_HUGETLB=1"         >> /.singularity.d/env/91-environment.sh
 
 WORKDIR /workspace
-LABEL org.opencontainers.image.version=0.0.4 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.5 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
