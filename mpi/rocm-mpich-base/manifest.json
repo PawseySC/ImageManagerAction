@@ -1,7 +1,7 @@
 {
   "main": "mpi",
   "feature": "rocm-mpich-base",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "devmode": true,
   "noscan": true,
   "platform": "x86",
@@ -16,8 +16,8 @@
     "path": "mpi/rocm-mpich-base/"
   },
   "metadata": {
-    "timestamp": "2025-10-24T00:22:59.712406Z",
-    "correlation_id": "63300129-ac22-4c82-aadd-92706227b674"
+    "timestamp": "2025-10-24T00:32:29.493052Z",
+    "correlation_id": "7c35cf9b-58eb-4414-b564-7e118b245044"
   },
   "template": {
     "OS_VERSION": "24.04",
@@ -26,7 +26,7 @@
     "MPI4PY_VERSION": "3.1.5",
     "LUSTRE_TAG": "v2_15_0",
     "ROCM_VERSION": "6.4.1",
-    "ENABLE_OSU": "1",
+    "ENABLE_OSU": "0",
     "GFX_ARCH": "gfx90a",
     "LIBFABRIC_PREFIX": "/opt/libfabric",
     "MPICH_PREFIX": "/opt/mpich",
