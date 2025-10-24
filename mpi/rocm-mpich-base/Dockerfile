@@ -130,7 +130,7 @@ RUN set -e \
       rsync ca-certificates tzdata gnupg wget \
  && rm -rf /var/lib/apt/lists/*
 
-# Install ROCm 6.4.1 HIP runtime (noble) with exact, verified package filename
+# Install ROCm 6.4.1 HIP runtime (noble) - no DKMS, noninteractive
 ARG ROCM_VERSION
 RUN set -e \
  && apt-get update -qq \
@@ -138,17 +138,14 @@ RUN set -e \
  && URL="https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/noble/${ROCM_DEB}" \
  && echo "Fetching ${URL}" \
  && wget -q -O "/tmp/${ROCM_DEB}" "${URL}" \
- # dpkg first pass (may be incomplete due to deps)
  && dpkg -i "/tmp/${ROCM_DEB}" || true \
- # fix deps, then ensure installer fully configured
  && apt-get -f install -y \
  && dpkg -i "/tmp/${ROCM_DEB}" \
- # install minimal runtime (no DKMS, no compilers)
- && /usr/bin/amdgpu-install -y --no-tty --usecase=rocm,hip-runtime --no-dkms \
- # cleanup
+ && /usr/bin/amdgpu-install -y --usecase=rocm,hip-runtime --no-dkms \
  && rm -f "/tmp/${ROCM_DEB}" \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /root/.cache
+
 
 # Copy runtime artifacts only (no headers/dev files)
 COPY --from=lustre-builder /opt/lustre/lib/liblustreapi.so* /opt/lustre/lib/
@@ -196,4 +193,4 @@ RUN mkdir -p /.singularity.d/env/ && \
     echo "export FI_CXI_DISABLE_CQ_HUGETLB=1"         >> /.singularity.d/env/91-environment.sh
 
 WORKDIR /workspace
-LABEL org.opencontainers.image.version=0.0.3 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.4 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
