@@ -52,7 +52,8 @@ RUN cd lustre-release \
       --disable-tests \
       CFLAGS=-Wno-error=attribute-warning \
  && make -j"$(nproc)" \
- && make install
+ && make install \
+ && ldconfig
 
 # ====================== Stage 2: Build MPI stack ======================
 FROM ubuntu:${OS_VERSION} AS mpi-builder
@@ -107,13 +108,11 @@ RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.31.7/cmake-3.3
 
 WORKDIR /tmp/build
 
-# Copy Lustre userspace from default install location (/usr/local)
-# Note: Only copy Lustre-specific files to avoid conflicts
-RUN mkdir -p /usr/local/include/lustre /usr/local/include/linux/lustre /usr/local/lib/pkgconfig
-COPY --from=lustre-builder /usr/local/include/lustre/ /usr/local/include/lustre/
-COPY --from=lustre-builder /usr/local/include/linux/lustre/ /usr/local/include/linux/lustre/
-COPY --from=lustre-builder /usr/local/lib/liblustreapi* /usr/local/lib/
-COPY --from=lustre-builder /usr/local/lib/pkgconfig/lustre.pc /usr/local/lib/pkgconfig/
+# Copy Lustre files from lustre-builder
+# Lustre installs headers to /usr/include when built with client support
+COPY --from=lustre-builder /usr/include/lustre /usr/include/lustre
+COPY --from=lustre-builder /usr/include/linux/lustre /usr/include/linux/lustre  
+COPY --from=lustre-builder /usr/lib/x86_64-linux-gnu/liblustreapi* /usr/lib/x86_64-linux-gnu/
 RUN ldconfig
 
 # Build libfabric
@@ -133,10 +132,7 @@ RUN wget -q http://www.mpich.org/static/downloads/${MPICH_VERSION}/mpich-${MPICH
  && tar xf /tmp/build/mpich_patches.tgz \
  && patch -p0 < csel.patch \
  && patch -p0 < ch4r_init.patch \
- && PKG_CONFIG_PATH=/opt/libfabric/lib/pkgconfig:/usr/local/lib/pkgconfig \
-    CPPFLAGS="-I/usr/local/include -I/opt/libfabric/include" \
-    LDFLAGS="-L/usr/local/lib -L/opt/libfabric/lib" \
-    LIBS="-llustreapi" \
+ && PKG_CONFIG_PATH=/opt/libfabric/lib/pkgconfig \
     ./configure --prefix=/opt/mpich \
       --without-mpe --enable-fortran=all --enable-shared --enable-sharedlibs=gcc \
       --enable-debuginfo --enable-yield=sched_yield --enable-g=mem \
@@ -220,7 +216,7 @@ RUN set -e \
  && rm -rf /var/lib/apt/lists/* /root/.cache
 
 # Copy built libraries and binaries
-COPY --from=mpi-builder /usr/local/lib/liblustreapi* /usr/local/lib/
+COPY --from=mpi-builder /usr/lib/x86_64-linux-gnu/liblustreapi* /usr/lib/x86_64-linux-gnu/
 COPY --from=mpi-builder /opt/libfabric /opt/libfabric
 COPY --from=mpi-builder /opt/mpich /opt/mpich
 COPY --from=mpi-builder /opt/aws-ofi-rccl /opt/aws-ofi-rccl
@@ -229,7 +225,7 @@ RUN ldconfig
 
 # Set up environment
 ENV PATH=/opt/mpich/bin:$PATH \
-    LD_LIBRARY_PATH=/usr/local/lib:/opt/libfabric/lib:/opt/mpich/lib:/opt/aws-ofi-rccl/lib:$LD_LIBRARY_PATH \
+    LD_LIBRARY_PATH=/opt/libfabric/lib:/opt/mpich/lib:/opt/aws-ofi-rccl/lib:$LD_LIBRARY_PATH \
     NCCL_SOCKET_IFNAME=hsn \
     CXI_FORK_SAFE=1 \
     CXI_FORK_SAFE_HP=1 \
@@ -268,4 +264,4 @@ RUN mkdir -p /.singularity.d/env/ && \
 RUN rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* || true
 
 WORKDIR /workspace
-LABEL org.opencontainers.image.version=0.0.16 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.17 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
