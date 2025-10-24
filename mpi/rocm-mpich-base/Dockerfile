@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     build-essential git autoconf automake libtool m4 pkg-config \
     libyaml-dev libkeyutils-dev uuid-dev zlib1g-dev \
-    libnl-genl-3-dev libnl-3-dev \
+    libnl-genl-3-dev libnl-3-dev linux-headers-generic \
     ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 
@@ -33,12 +33,18 @@ RUN set -e; \
   done
 
 # Build userspace (liblustreapi + utils) only
+# Generate UAPI headers first, then build only userspace libs and utils
 RUN bash autogen.sh \
  && ./configure --prefix=/opt/lustre \
-      --disable-server --disable-tests --disable-modules \
+      --disable-server --disable-tests \
       --without-ldiskfs --without-zfs \
- && make -j"$(nproc)" \
- && make install
+ && make include/linux/lnet/lnet-types.h include/linux/lustre/lustre_ver.h \
+ && make -C libcfs/libcfs -j"$(nproc)" \
+ && make -C lnet/utils -j"$(nproc)" \
+ && make -C lustre/utils -j"$(nproc)" \
+ && make -C libcfs/libcfs install \
+ && make -C lnet/utils install \
+ && make -C lustre/utils install
 
 # ====================== Stage 2: Core builder (HPC stack) ======================
 FROM ubuntu:${OS_VERSION} AS core-builder
@@ -200,4 +206,4 @@ RUN mkdir -p /.singularity.d/env/ && \
     echo "export FI_CXI_DISABLE_CQ_HUGETLB=1"         >> /.singularity.d/env/91-environment.sh
 
 WORKDIR /workspace
-LABEL org.opencontainers.image.version=0.0.10 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.11 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
