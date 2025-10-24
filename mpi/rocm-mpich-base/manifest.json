@@ -1,7 +1,7 @@
 {
   "main": "mpi",
   "feature": "rocm-mpich-base",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "devmode": true,
   "noscan": true,
   "platform": "x86",
@@ -16,8 +16,8 @@
     "path": "mpi/rocm-mpich-base/"
   },
   "metadata": {
-    "timestamp": "2025-10-24T00:12:25.450000Z",
-    "correlation_id": "38153187-a2f6-40a0-9660-8eeac4d7091c"
+    "timestamp": "2025-10-24T00:22:59.712406Z",
+    "correlation_id": "63300129-ac22-4c82-aadd-92706227b674"
   },
   "template": {
     "OS_VERSION": "24.04",

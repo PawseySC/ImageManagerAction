@@ -9,6 +9,7 @@ ARG ENABLE_OSU="1"
 ARG GFX_ARCH="gfx90a"
 
 # ====================== Stage 1: Lustre userspace ======================
+# ====================== Stage 1: Lustre userspace ======================
 FROM ubuntu:${OS_VERSION} AS lustre-builder
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -22,8 +23,24 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
 ARG LUSTRE_TAG
 WORKDIR /tmp/lustre
 
-# Clone Lustre (userspace only) via HTTPS
-RUN git clone --depth 1 --branch "${LUSTRE_TAG}" https://git.whamcloud.com/fs/lustre-release.git .
+# Fetch Lustre sources (prefer git:// with retries; optional HTTPS snapshot fallback)
+# NOTE: Some networks block 'git://'—if so, uncomment the HTTPS snapshot block below.
+RUN set -e \
+ && for i in 1 2 3; do \
+      echo "Cloning Lustre (attempt $i)..." && \
+      git clone --depth 1 --branch "${LUSTRE_TAG}" git://git.whamcloud.com/fs/lustre-release.git . && break || { \
+        echo "Clone failed (attempt $i). Retrying..."; \
+        rm -rf .git || true; \
+        sleep 5; \
+      }; \
+    done
+
+# Optional HTTPS snapshot fallback (commented out by default)
+# RUN set -e \
+#  && SNAP_URL="https://git.whamcloud.com/?p=fs/lustre-release.git;a=snapshot;h=refs/tags/${LUSTRE_TAG};sf=tgz" \
+#  && echo "Fetching snapshot: ${SNAP_URL}" \
+#  && curl -fsSL "${SNAP_URL}" -o lustre.tar.gz \
+#  && tar -xzf lustre.tar.gz --strip-components=1
 
 # Build only userspace libraries (liblustreapi + utils)
 RUN ./autogen.sh && \
@@ -32,6 +49,7 @@ RUN ./autogen.sh && \
       --without-ldiskfs --without-zfs \
       --disable-modules && \
     make -C lustre/utils -j"$(nproc)" && make -C lustre/utils install
+
 
 # ====================== Stage 2: HPC core builder ======================
 FROM ubuntu:${OS_VERSION} AS core-builder
@@ -190,4 +208,4 @@ RUN mkdir -p /.singularity.d/env/ && \
     echo "export FI_CXI_DISABLE_CQ_HUGETLB=1"         >> /.singularity.d/env/91-environment.sh
 
 WORKDIR /workspace
-LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.2 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
