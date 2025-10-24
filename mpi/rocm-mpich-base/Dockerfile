@@ -47,9 +47,9 @@ RUN set -e; \
 
 RUN cd lustre-release \
  && bash autogen.sh \
- && ./configure --disable-server \
+ && ./configure --disable-server --enable-client \
       --with-linux=/usr/lib/modules/${LINUX_KERNEL}-generic/build \
-      --disable-tests --disable-modules \
+      --disable-tests \
       CFLAGS=-Wno-error=attribute-warning \
  && make -j"$(nproc)" \
  && make install
@@ -107,12 +107,13 @@ RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.31.7/cmake-3.3
 
 WORKDIR /tmp/build
 
-# Copy Lustre from default install location (/usr/local)
-RUN mkdir -p /usr/local/include/linux /usr/local/lib/pkgconfig
-COPY --from=lustre-builder /usr/local/include/lustre /usr/local/include/lustre
-COPY --from=lustre-builder /usr/local/include/linux/lustre /usr/local/include/linux/lustre
-COPY --from=lustre-builder /usr/local/lib/liblustreapi* /usr/local/lib/
-COPY --from=lustre-builder /usr/local/lib/pkgconfig/ /usr/local/lib/pkgconfig/
+# Copy Lustre userspace from default install location (/usr/local)
+# Note: Lustre builds both kernel modules and userspace, we only need userspace for MPICH
+RUN mkdir -p /usr/local/include/linux /usr/local/lib/pkgconfig /usr/local/bin /usr/local/sbin
+COPY --from=lustre-builder /usr/local/include/ /usr/local/include/
+COPY --from=lustre-builder /usr/local/lib/ /usr/local/lib/
+COPY --from=lustre-builder /usr/local/bin/ /usr/local/bin/
+COPY --from=lustre-builder /usr/local/sbin/ /usr/local/sbin/
 RUN ldconfig
 
 # Build libfabric
@@ -267,4 +268,4 @@ RUN mkdir -p /.singularity.d/env/ && \
 RUN rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* || true
 
 WORKDIR /workspace
-LABEL org.opencontainers.image.version=0.0.14 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.15 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
