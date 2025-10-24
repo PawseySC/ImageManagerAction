@@ -22,11 +22,11 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
 ARG LUSTRE_TAG
 WORKDIR /tmp/lustre
 
-# Fetch Lustre (git://) with simple retries
+# Fetch Lustre from GitHub mirror (more reliable)
 RUN set -e; \
   for i in 1 2 3; do \
     echo "Cloning Lustre (attempt $i)..." && \
-    git clone --depth 1 --branch "${LUSTRE_TAG}" git://git.whamcloud.com/fs/lustre-release.git . && break || { \
+    git clone --depth 1 --branch "${LUSTRE_TAG}" https://github.com/lustre/lustre-release.git . && break || { \
       echo "Clone failed (attempt $i). Retrying in 5s..."; sleep 5; \
     }; \
   done
@@ -199,4 +199,4 @@ RUN mkdir -p /.singularity.d/env/ && \
     echo "export FI_CXI_DISABLE_CQ_HUGETLB=1"         >> /.singularity.d/env/91-environment.sh
 
 WORKDIR /workspace
-LABEL org.opencontainers.image.version=0.0.6 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.7 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
