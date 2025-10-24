@@ -12,7 +12,7 @@ ARG GFX_ARCH="gfx90a"
 FROM ubuntu:${OS_VERSION} AS lustre-builder
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install build dependencies for Lustre userspace
+# Build deps for Lustre userspace
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     build-essential git autoconf automake libtool m4 pkg-config \
     libyaml-dev libkeyutils-dev uuid-dev zlib1g-dev \
@@ -22,8 +22,8 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
 ARG LUSTRE_TAG
 WORKDIR /tmp/lustre
 
-# Clone Lustre source (userspace only)
-RUN git clone --depth 1 --branch ${LUSTRE_TAG} git://git.whamcloud.com/fs/lustre-release.git .
+# Clone Lustre (userspace only) via HTTPS
+RUN git clone --depth 1 --branch "${LUSTRE_TAG}" https://git.whamcloud.com/fs/lustre-release.git .
 
 # Build only userspace libraries (liblustreapi + utils)
 RUN ./autogen.sh && \
@@ -41,7 +41,7 @@ ARG LIBFABRIC_VERSION
 ARG MPICH_VERSION
 ARG ENABLE_OSU
 
-# Install build dependencies for MPICH/libfabric/aws-ofi-rccl
+# Build deps for MPICH/libfabric/aws-ofi-rccl
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     build-essential gcc-12 g++-12 gfortran-12 \
     git wget curl ca-certificates pkg-config \
@@ -51,13 +51,13 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     ninja-build \
  && rm -rf /var/lib/apt/lists/*
 
-# Install a modern CMake (only needed during build)
+# Modern CMake (build-only)
 RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.31.7/cmake-3.31.7-linux-x86_64.sh \
  && chmod +x cmake-3.31.7-linux-x86_64.sh \
  && ./cmake-3.31.7-linux-x86_64.sh --skip-license --prefix=/usr \
  && cmake --version
 
-# Copy Lustre userspace from the previous stage (headers + liblustreapi)
+# Bring in Lustre userspace (headers + liblustreapi)
 COPY --from=lustre-builder /opt/lustre /opt/lustre
 
 WORKDIR /tmp/build
@@ -70,18 +70,18 @@ RUN wget -q https://github.com/ofiwg/libfabric/archive/refs/tags/v${LIBFABRIC_VE
  && ./autogen.sh && ./configure --prefix=${LIBFABRIC_PREFIX} \
  && make -j"$(nproc)" && make install-strip
 
-# Copy MPICH patch package (from build context)
+# Copy MPICH patch package from build context
 COPY mpich_patches.tgz /tmp/build/
 
-# -------- Build MPICH (with Lustre ROMIO and patches) --------
+# -------- Build MPICH (with Lustre ROMIO + patches) --------
 ARG MPICH_PREFIX="/opt/mpich"
 RUN wget -q http://www.mpich.org/static/downloads/${MPICH_VERSION}/mpich-${MPICH_VERSION}.tar.gz \
  && tar xf mpich-${MPICH_VERSION}.tar.gz && cd mpich-${MPICH_VERSION} \
- # === Apply your patches exactly as before ===
+ # Apply your patches exactly as before
  && tar xf /tmp/build/mpich_patches.tgz \
  && patch -p0 < csel.patch \
  && patch -p0 < ch4r_init.patch \
- # === Configure and build Lustre-aware MPICH ===
+ # Configure and build Lustre-aware MPICH
  && CPPFLAGS="-I/opt/lustre/include" LDFLAGS="-L/opt/lustre/lib" LIBS="-llustreapi" \
     ./configure --prefix=${MPICH_PREFIX} \
       --without-mpe --enable-fortran=all --enable-shared \
@@ -126,26 +126,32 @@ RUN set -e \
       rsync ca-certificates tzdata gnupg wget \
  && rm -rf /var/lib/apt/lists/*
 
-# Minimal ROCm (HIP runtime) — POSIX-safe
+# Minimal ROCm (HIP runtime) for 6.4.1 on Ubuntu 24.04 (noble)
 ARG ROCM_VERSION
 RUN set -e \
  && apt-get update -qq \
  && ROCM_DEB_VER="$(printf '%s' "$ROCM_VERSION" | sed 's/\./0/g')-1" \
  && ROCM_DEB="amdgpu-install_${ROCM_DEB_VER}_all.deb" \
- && wget -q "https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/noble/${ROCM_DEB}" \
- && apt-get install -y "./${ROCM_DEB}" || (apt-get -f install -y && apt-get install -y "./${ROCM_DEB}") \
+ && URL="https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/noble/${ROCM_DEB}" \
+ && echo "Fetching ${URL}" \
+ && wget -q --show-progress --progress=dot:giga -O "${ROCM_DEB}" "${URL}" \
+ # Install local .deb via dpkg, then fix dependencies
+ && dpkg -i "./${ROCM_DEB}" || apt-get -f install -y \
+ # Install minimal runtime (no DKMS, no toolchains)
  && amdgpu-install -y --no-tty --usecase=rocm,hip-runtime --no-dkms \
+ # Cleanup
  && rm -f "./${ROCM_DEB}" \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /root/.cache
 
-# Copy artifacts
+# Copy runtime artifacts (no headers/dev files)
 COPY --from=lustre-builder /opt/lustre/lib/liblustreapi.so* /opt/lustre/lib/
 COPY --from=core-builder   /opt/libfabric /opt/libfabric
 COPY --from=core-builder   /opt/mpich    /opt/mpich
 COPY --from=core-builder   /opt/aws-ofi-rccl /opt/aws-ofi-rccl
 COPY --from=core-builder   /opt/osu      /opt/osu
 
+# Paths
 ENV PATH=/opt/mpich/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/lustre/lib:/opt/libfabric/lib:/opt/mpich/lib:/opt/aws-ofi-rccl/lib:$LD_LIBRARY_PATH
 
@@ -161,7 +167,7 @@ RUN pip install --no-cache-dir mpi4py==${MPI4PY_VERSION}
 # Trim docs/locales
 RUN rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* || true
 
-# Env
+# Environment
 ENV NCCL_SOCKET_IFNAME=hsn \
     CXI_FORK_SAFE=1 \
     CXI_FORK_SAFE_HP=1 \
