@@ -47,9 +47,9 @@ RUN set -e; \
 
 RUN cd lustre-release \
  && bash autogen.sh \
- && ./configure --disable-server --enable-client \
+ && ./configure --disable-server \
       --with-linux=/usr/lib/modules/${LINUX_KERNEL}-generic/build \
-      --disable-tests \
+      --disable-tests --disable-modules \
       CFLAGS=-Wno-error=attribute-warning \
  && make -j"$(nproc)" \
  && make install
@@ -267,4 +267,4 @@ RUN mkdir -p /.singularity.d/env/ && \
 RUN rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* || true
 
 WORKDIR /workspace
-LABEL org.opencontainers.image.version=0.0.13 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.14 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
