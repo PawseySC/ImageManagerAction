@@ -145,7 +145,10 @@ RUN set -e \
  && apt-get -f install -y \
  && dpkg -i "/tmp/${ROCM_DEB}" \
  && mkdir -p /var/cache/apt/archives/partial \
- && amdgpu-install -y --usecase=rocm,hip-runtime --no-dkms \
+ && amdgpu-install -y --usecase=rocm --no-dkms --no-32 \
+ && apt-get update -qq \
+ && apt-get install -y --no-install-recommends \
+      rocm-hip-runtime rocm-hip-libraries \
  && rm -f "/tmp/${ROCM_DEB}" \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /root/.cache
@@ -196,4 +199,4 @@ RUN mkdir -p /.singularity.d/env/ && \
     echo "export FI_CXI_DISABLE_CQ_HUGETLB=1"         >> /.singularity.d/env/91-environment.sh
 
 WORKDIR /workspace
-LABEL org.opencontainers.image.version=0.0.5 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.6 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
