@@ -1,0 +1,33 @@
+{
+  "main": "mpi",
+  "feature": "rocm-mpich-base",
+  "version": "0.0.18",
+  "devmode": true,
+  "noscan": true,
+  "platform": "x86",
+  "shpc": false,
+  "targets": [],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-mpi/rocm-mpich-base",
+    "path": "mpi/rocm-mpich-base/"
+  },
+  "metadata": {
+    "timestamp": "2025-10-24T02:48:36.652885Z",
+    "correlation_id": "4f24ab47-dd08-4052-a647-ca705bfa689f"
+  },
+  "template": {
+    "OS_VERSION": "24.04",
+    "LINUX_KERNEL": "6.8.0-31",
+    "LIBFABRIC_VERSION": "1.18.1",
+    "MPICH_VERSION": "3.4.3",
+    "MPI4PY_VERSION": "3.1.5",
+    "ROCM_VERSION": "6.4.1",
+    "ENABLE_OSU": "1",
+    "GFX_ARCH": "gfx90a",
+    "OSU_VERSION": "7.3"
+  }
+}
