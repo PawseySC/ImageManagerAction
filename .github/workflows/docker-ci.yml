@@ -62,7 +62,8 @@ jobs:
       build_matrix: ${{ steps.process_template.outputs.matrix }}
       has_template: ${{ steps.process_template.outputs.has_template }}
       variant_count: ${{ steps.process_template.outputs.variant_count }}
-    
+      runner_label: ${{ steps.choose_runner.outputs.runner_label }}
+
     steps:
       - name: Initialize runner configuration
         id: set_default_runner_label
@@ -348,6 +349,18 @@ jobs:
           echo "dockerfile_path=$dockerfile_path" >> $GITHUB_OUTPUT
           echo "correlation_id=$correlation_id" >> $GITHUB_OUTPUT
 
+      - name: Decide runner by platform
+        id: choose_runner
+        if: steps.validate_manifest.outputs.proceed_valid == 'true'
+        run: |
+          platform="${{ steps.validate_manifest.outputs.platform }}"
+          if [ "$platform" = "arm" ]; then
+            echo "runner_label=ella-n003" >> $GITHUB_OUTPUT
+          else
+            echo "runner_label=setonix-podman02" >> $GITHUB_OUTPUT
+          fi
+          echo "Selected runner: $([ "$platform" = "arm" ] && echo "ella-n003" || echo "setonix-podman02") for platform: $platform"
+
       - name: Generate date tag
         if: steps.validate_manifest.outputs.proceed_valid == 'true'
         id: date
@@ -377,7 +390,7 @@ jobs:
 
   BUILD-job:
     needs: PREPARE-job
-    runs-on: setonix-podman02
+    runs-on: ${{ needs.PREPARE-job.outputs.runner_label }}
     if: needs.PREPARE-job.outputs.proceed_valid == 'true'
     strategy:
       matrix: ${{ fromJson(needs.PREPARE-job.outputs.build_matrix) }}
@@ -768,7 +781,7 @@ jobs:
 
   SCAN-AND-REPORT-job:
     needs: [BUILD-job, PREPARE-job]
-    runs-on: setonix-podman02
+    runs-on: ${{ needs.PREPARE-job.outputs.runner_label }}
     if: needs.PREPARE-job.outputs.proceed_valid == 'true' && needs.PREPARE-job.outputs.noscan != 'true'
     strategy:
       matrix: ${{ fromJson(needs.PREPARE-job.outputs.build_matrix) }}
@@ -971,7 +984,7 @@ jobs:
 
   PUSH-PRIV-job:
     needs: [BUILD-job, PREPARE-job]
-    runs-on: setonix-podman02
+    runs-on: ${{ needs.PREPARE-job.outputs.runner_label }}
     if: needs.PREPARE-job.outputs.proceed_valid == 'true'
     strategy:
       matrix: ${{ fromJson(needs.PREPARE-job.outputs.build_matrix) }}
@@ -1095,7 +1108,7 @@ jobs:
 
   PUSH-PUBLIC-job:
     needs: [BUILD-job, PREPARE-job, PUSH-PRIV-job]
-    runs-on: setonix-podman02
+    runs-on: ${{ needs.PREPARE-job.outputs.runner_label }}
     if: needs.PREPARE-job.outputs.proceed_valid == 'true'
     strategy:
       matrix: ${{ fromJson(needs.PREPARE-job.outputs.build_matrix) }}
@@ -1328,8 +1341,8 @@ jobs:
 
   DEPLOY-job:
     needs: [BUILD-job, PREPARE-job, PUSH-PUBLIC-job]
-    runs-on: setonix-podman02
-    if: needs.PREPARE-job.outputs.proceed_valid == 'true' && needs.PREPARE-job.outputs.shpc == 'true' && (needs.PREPARE-job.outputs.quayio_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'quay.io'))
+    runs-on: ${{ needs.PREPARE-job.outputs.runner_label }}
+    if: needs.PREPARE-job.outputs.proceed_valid == 'true' && needs.PREPARE-job.outputs.shpc == 'true' && needs.PREPARE-job.outputs.platform == 'x86' && (needs.PREPARE-job.outputs.quayio_available == 'true' && contains(needs.PREPARE-job.outputs.targets, 'quay.io'))
     strategy:
       matrix: ${{ fromJson(needs.PREPARE-job.outputs.build_matrix) }}
       fail-fast: false
