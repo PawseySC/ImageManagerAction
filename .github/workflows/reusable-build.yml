@@ -148,7 +148,7 @@ jobs:
 
           # Simple 2-tier configuration
           if [ "$CPU_CORES" -gt 8 ]; then
-            JOBS="16"  # High-core systems
+            JOBS="32"  # High-core systems
           else
             JOBS="4"   # Standard systems (8 cores and below)
           fi
@@ -247,13 +247,15 @@ jobs:
             echo "$sanitized"
           }
 
-          # Create image name from main and feature and sanitize it
-          image_name_raw="${main}-${feature}"
+          # Create image name from main and feature and variant suffix, then sanitize it
+          # VARIANT_SUFFIX is set by compute_variant step (e.g., "-python-3.9" or "")
+          image_name_raw="${main}-${feature}${VARIANT_SUFFIX}"
           image_name=$(sanitize_docker_name "$image_name_raw")
           image_tag="${image_name}:${version}"
 
           echo "Original image name: $image_name_raw"
           echo "Sanitized image name: $image_name"
+          echo "Variant suffix: ${VARIANT_SUFFIX}"
           echo "Final image tag: $image_tag"
 
           # Set up cache tracking (Podman uses native layer caching)
@@ -373,17 +375,22 @@ jobs:
           echo "Source: docker-archive://$archive_file"
           echo "Output: $sif_file"
 
-          # Load Singularity module
-          echo "Loading Singularity module..."
-          if module load singularity/4.1.0; then
-            echo "✓ Singularity module loaded successfully"
+          # Ensure Singularity is available (multi-environment support)
+          echo "Ensuring Singularity is available..."
+
+          if command -v singularity >/dev/null 2>&1; then
+            echo "✓ Singularity already available in PATH"
+            singularity --version
+          elif module load singularity/4.1.0 2>/dev/null && command -v singularity >/dev/null 2>&1; then
+            echo "✓ Singularity loaded via Setonix module system"
+            singularity --version
           else
-            echo "✗ Failed to load Singularity module"
+            echo "✗ Singularity not available"
+            echo "Tried:"
+            echo "  1. Direct PATH lookup (Ella/ARM)"
+            echo "  2. module load singularity/4.1.0 (Setonix)"
             exit 1
           fi
-
-          # Verify Singularity is available
-          singularity --version
 
           # Build SIF file from Docker archive using Singularity
           echo "Building SIF file from Docker archive..."

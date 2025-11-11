@@ -6,10 +6,16 @@ on:
       runner_label:
         required: true
         type: string
-      image_name:
+      main:
+        required: true
+        type: string
+      feature:
         required: true
         type: string
       version:
+        required: true
+        type: string
+      has_template:
         required: true
         type: string
       build_matrix:
@@ -36,14 +42,37 @@ jobs:
       matrix: ${{ fromJson(inputs.build_matrix) }}
       fail-fast: false
     env:
-      IMAGE_NAME: ${{ inputs.image_name }}
       VERSION: ${{ inputs.version }}
       BUCKET: ${{ vars.ACACIA_BUCKETNAME }}
     steps:
+    - name: Compute image name for this variant
+      id: compute_image_name
+      run: |
+        set -euo pipefail
+
+        # Get template values from matrix
+        template_values='${{ toJson(matrix.values) }}'
+        main="${{ inputs.main }}"
+        feature="${{ inputs.feature }}"
+
+        # Compute variant suffix (same logic as BUILD job)
+        if [ "${{ inputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")' | tr '[:upper:]' '[:lower:]')
+        else
+          variant_suffix=""
+        fi
+
+        # Sanitize image name (same logic as BUILD job)
+        image_name_raw="${main}-${feature}${variant_suffix}"
+        image_name=$(echo "$image_name_raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^[.-]*//;s/[.-]*$//')
+
+        echo "IMAGE_NAME=$image_name" >> $GITHUB_ENV
+        echo "Computed image name: $image_name"
+
     - name: Display registry environment
       run: |
         echo "Hostname: $(hostname)"
-        echo "Pushing: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
+        echo "Pushing: ${IMAGE_NAME}:${VERSION}"
         echo "Variant #${{ matrix.index }}"
 
     - name: Configure podman environment

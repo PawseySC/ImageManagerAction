@@ -360,11 +360,18 @@ jobs:
           fi
 
           echo "✓ Manifest validation passed"
+
+          # Add platform suffix to version for multi-architecture support
+          # Original version from manifest: X.Y.Z
+          # Final version with platform: X.Y.Z-arm or X.Y.Z-x86
+          version_with_platform="${version}-${platform}"
+
           echo ""
           echo "=== Configuration Summary ==="
           echo "Main: $main"
           echo "Feature: $feature"
-          echo "Version: $version"
+          echo "Version (from manifest): $version"
+          echo "Version (with platform): $version_with_platform"
           echo "Dev Mode: $devmode"
           echo "No Scan: $noscan"
           echo "Platform: $platform"
@@ -376,11 +383,11 @@ jobs:
           echo "Dockerfile: $dockerfile_path"
           echo "============================"
 
-          # Set outputs
+          # Set outputs (use version_with_platform for all downstream jobs)
           echo "proceed_valid=true" >> $GITHUB_OUTPUT
           echo "main=$main" >> $GITHUB_OUTPUT
           echo "feature=$feature" >> $GITHUB_OUTPUT
-          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "version=$version_with_platform" >> $GITHUB_OUTPUT
           echo "devmode=$devmode" >> $GITHUB_OUTPUT
           echo "noscan=$noscan" >> $GITHUB_OUTPUT
           echo "platform=$platform" >> $GITHUB_OUTPUT
