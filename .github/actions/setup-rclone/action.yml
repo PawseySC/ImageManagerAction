@@ -83,30 +83,72 @@ runs:
       id: load_rclone
       shell: bash
       run: |
-        set -euo pipefail
-        echo "Loading rclone module..."
-        if module load rclone/1.68.1; then
-          echo "✓ rclone module loaded successfully"
+        set +e  # Don't exit on errors, we'll try multiple methods
+        echo "Loading rclone module (trying multiple methods)..."
+
+        # Method 1: Check if rclone is already available
+        if command -v rclone >/dev/null 2>&1; then
+          echo "✓ rclone already available in PATH"
+          rclone version
           echo "loaded=true" >> $GITHUB_OUTPUT
-          # Verify rclone is available
-          if command -v rclone >/dev/null 2>&1; then
-            echo "✓ rclone command is available"
-            rclone version
-          else
-            echo "✗ rclone command not found after module load"
-            exit 1
-          fi
-        else
-          echo "✗ Failed to load rclone module"
-          exit 1
+          exit 0
         fi
+
+        # Method 2: Try Setonix module system (module load rclone/1.68.1)
+        echo "Trying Setonix module load..."
+        if module load rclone/1.68.1 2>/dev/null; then
+          if command -v rclone >/dev/null 2>&1; then
+            echo "✓ rclone loaded via Setonix module system"
+            rclone version
+            echo "loaded=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+        fi
+
+        # Method 3: Try Ella/ARM spack method (module load spack + spack load rclone)
+        echo "Trying Ella/ARM spack method..."
+        if module load spack 2>/dev/null; then
+          if spack load rclone 2>/dev/null; then
+            if command -v rclone >/dev/null 2>&1; then
+              echo "✓ rclone loaded via spack"
+              rclone version
+              echo "loaded=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+        fi
+
+        # All methods failed
+        echo "✗ Failed to load rclone using any available method"
+        echo "Tried:"
+        echo "  1. Direct PATH lookup"
+        echo "  2. module load rclone/1.68.1 (Setonix)"
+        echo "  3. module load spack && spack load rclone (Ella/ARM)"
+        exit 1
 
     - name: Configure rclone (local config)
       shell: bash
       run: |
         set -euo pipefail
-        # Load rclone module
-        module load rclone/1.68.1
+
+        # Helper function to ensure rclone is loaded
+        ensure_rclone() {
+          if command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          # Try Setonix method
+          if module load rclone/1.68.1 2>/dev/null && command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          # Try Ella/ARM spack method
+          if module load spack 2>/dev/null && spack load rclone 2>/dev/null && command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          echo "✗ rclone not available"
+          return 1
+        }
+
+        ensure_rclone
 
         # Use unique config directory per job to avoid conflicts in matrix builds
         # Include PID and random suffix for uniqueness
@@ -132,8 +174,23 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # Load rclone module
-        module load rclone/1.68.1
+
+        # Helper function to ensure rclone is loaded
+        ensure_rclone() {
+          if command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          if module load rclone/1.68.1 2>/dev/null && command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          if module load spack 2>/dev/null && spack load rclone 2>/dev/null && command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          echo "✗ rclone not available"
+          return 1
+        }
+
+        ensure_rclone
         echo "Verifying rclone configuration..."
         rclone config show
 
@@ -141,9 +198,24 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # Load rclone module
-        module load rclone/1.68.1
-        
+
+        # Helper function to ensure rclone is loaded
+        ensure_rclone() {
+          if command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          if module load rclone/1.68.1 2>/dev/null && command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          if module load spack 2>/dev/null && spack load rclone 2>/dev/null && command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          echo "✗ rclone not available"
+          return 1
+        }
+
+        ensure_rclone
+
         bucket="${{ inputs.bucket }}"
         endpoint="${{ inputs.endpoint }}"
         
@@ -256,9 +328,24 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # Load rclone module
-        module load rclone/1.68.1
-        
+
+        # Helper function to ensure rclone is loaded
+        ensure_rclone() {
+          if command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          if module load rclone/1.68.1 2>/dev/null && command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          if module load spack 2>/dev/null && spack load rclone 2>/dev/null && command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          echo "✗ rclone not available"
+          return 1
+        }
+
+        ensure_rclone
+
         # Validate required inputs for download mode
         if [ -z "${{ inputs.dockerfile_name }}" ] || [ -z "${{ inputs.version }}" ]; then
           echo "Error: dockerfile_name and version are required when download_mode=true"
@@ -345,9 +432,24 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # Load rclone module
-        module load rclone/1.68.1
-        
+
+        # Helper function to ensure rclone is loaded
+        ensure_rclone() {
+          if command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          if module load rclone/1.68.1 2>/dev/null && command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          if module load spack 2>/dev/null && spack load rclone 2>/dev/null && command -v rclone >/dev/null 2>&1; then
+            return 0
+          fi
+          echo "✗ rclone not available"
+          return 1
+        }
+
+        ensure_rclone
+
         # Validate required inputs for upload mode
         if [ -z "${{ inputs.upload_file }}" ]; then
           echo "Error: upload_file is required when upload_mode=true"
