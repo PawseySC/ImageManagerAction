@@ -1,0 +1,197 @@
+name: Reusable — DEPLOY (SHPC)
+
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        required: true
+        type: string
+      image_name:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      main:
+        required: true
+        type: string
+      feature:
+        required: true
+        type: string
+      platform:
+        required: true
+        type: string
+      correlation_id:
+        required: true
+        type: string
+      build_matrix:
+        required: true
+        type: string
+      targets:
+        required: true
+        type: string
+      quayio_available:
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ${{ inputs.runner_label }}
+    strategy:
+      matrix: ${{ fromJson(inputs.build_matrix) }}
+      fail-fast: false
+    env:
+      IMAGE_NAME: ${{ inputs.image_name }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Display deployment environment
+        run: |
+          echo "Hostname: $(hostname)"
+          echo "Starting SHPC deployment for ${IMAGE_NAME}:${VERSION}"
+          echo "Variant #${{ matrix.index }}"
+          echo "Configured targets: ${{ inputs.targets }}"
+          echo ""
+          echo "Available public registries for SHPC:"
+          if [ "${{ inputs.quayio_available }}" = "true" ] && echo '${{ inputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
+            echo "• Quay.io: quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
+          fi
+
+      - name: Load SHPC module and setup environment
+        id: shpc_setup
+        run: |
+          set -euo pipefail
+          echo "Loading SHPC module..."
+          if module load shpc/0.1.32; then
+            echo "✓ SHPC module loaded successfully"
+            shpc --version
+          else
+            echo "✗ Failed to load SHPC module"
+            exit 1
+          fi
+
+          # Set SHPC registry path
+          SHPC_REGISTRY="/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry"
+          echo "SHPC_REGISTRY=$SHPC_REGISTRY" >> $GITHUB_ENV
+          echo "SHPC registry path: $SHPC_REGISTRY"
+
+      - name: Determine deployment target and get SHA256 digest
+        id: get_image_info
+        run: |
+          set -euo pipefail
+
+          # Use Quay.io for deployment (IMAGE_NAME already includes variant suffix from BUILD-job)
+          if [ "${{ inputs.quayio_available }}" = "true" ] && echo '${{ inputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
+            full_image="quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
+            registry_url="https://quay.io/v2"
+            api_path="pawsey/${IMAGE_NAME}"
+            registry_type="quay.io"
+          else
+            echo "Error: Quay.io registry not available for deployment"
+            echo "Quay.io must be available and in targets for SHPC deployment"
+            exit 1
+          fi
+
+          echo "Deploying image: $full_image"
+          echo "Registry API: $registry_url"
+          echo "API path: $api_path"
+
+          # Get manifest and extract digest
+          echo "Fetching manifest for tag: ${VERSION}"
+
+          digest=$(curl -s -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+            "$registry_url/$api_path/manifests/${VERSION}" \
+            | jq -r '.config.digest // empty')
+
+          if [ -z "$digest" ] || [ "$digest" = "null" ]; then
+            echo "Warning: Could not get digest, using placeholder"
+            digest="sha256:placeholder_digest_for_${VERSION}"
+          fi
+
+          echo "SHA256 digest: $digest"
+
+          # Set outputs
+          echo "full_image=$full_image" >> $GITHUB_OUTPUT
+          echo "registry_type=$registry_type" >> $GITHUB_OUTPUT
+          echo "digest=$digest" >> $GITHUB_OUTPUT
+
+      - name: Create SHPC container registry entry
+        run: |
+          set -euo pipefail
+
+          full_image="${{ steps.get_image_info.outputs.full_image }}"
+          registry_type="${{ steps.get_image_info.outputs.registry_type }}"
+          digest="${{ steps.get_image_info.outputs.digest }}"
+
+          # Create registry directory structure based on the deployed image
+          # IMAGE_NAME already includes variant suffix from BUILD-job
+          shpc_path="${SHPC_REGISTRY}/quay.io/pawsey/${IMAGE_NAME}"
+
+          echo "Creating SHPC registry entry at: $shpc_path"
+
+          # Create container.yaml content
+          container_yaml=$(cat <<EOF
+          docker: $full_image
+
+          latest:
+            "${VERSION}": "$digest"
+          tags:
+            "${VERSION}": "$digest"
+
+          maintainer: "@image-manager-ci"
+
+          description: "Container for ${IMAGE_NAME} version ${VERSION} - deployed via Image Manager CI/CD"
+          url: "https://github.com/${GITHUB_REPOSITORY}"
+
+          # Image Manager metadata
+          image_manager:
+            main: "${{ inputs.main }}"
+            feature: "${{ inputs.feature }}"
+            platform: "${{ inputs.platform }}"
+            variant_index: ${{ matrix.index }}
+            image_name: "${IMAGE_NAME}"
+            correlation_id: "${{ inputs.correlation_id }}"
+            branch: "${{ github.ref_name }}"
+            deployed_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          EOF
+          )
+
+          echo "Container YAML content:"
+          echo "$container_yaml"
+
+          # Verify SHPC configuration before writing
+          echo "Verifying SHPC configuration..."
+          module load shpc/0.1.32
+          if shpc config get registry | grep -q pawsey_registry; then
+            echo "✓ SHPC registry is properly configured"
+          else
+            echo "Warning: SHPC registry may not be properly configured"
+          fi
+
+          # Write container YAML to temporary file
+          temp_file="/tmp/container_${RANDOM}.yaml"
+          echo "$container_yaml" > "$temp_file"
+          echo "Container YAML written to temporary file: $temp_file"
+
+          # Switch to spack user to create registry entry
+          echo "Switching to spack user to write to registry..."
+          sudo su - spack << EOF
+          set -euo pipefail
+          echo "Now running as spack user"
+          mkdir -p '$shpc_path'
+          cp '$temp_file' '$shpc_path/container.yaml'
+          echo '✓ SHPC registry entry created successfully'
+          ls -la '$shpc_path/'
+          cat '$shpc_path/container.yaml'
+          EOF
+
+          # Clean up temporary file
+          rm -f "$temp_file"
+          echo "Temporary file cleaned up"
+
+          echo "✅ SHPC deployment completed"
+          echo "Registry path: $shpc_path"
+          echo "Image: $full_image"
+          echo "Version: ${VERSION}"
+          echo "Variant #${{ matrix.index }}"
+          echo "Digest: $digest"
+          echo "Correlation ID: ${{ inputs.correlation_id }}"

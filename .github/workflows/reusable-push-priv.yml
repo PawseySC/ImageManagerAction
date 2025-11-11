@@ -1,0 +1,153 @@
+name: Reusable — PUSH PRIVATE
+
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        required: true
+        type: string
+      image_name:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      build_matrix:
+        required: true
+        type: string
+      private_targets:
+        required: true
+        type: string
+      setonixreg_available:
+        required: true
+        type: string
+    secrets:
+      ACACIA_ACCESS_KEY_ID:
+        required: true
+      ACACIA_SECRET_ACCESS_KEY:
+        required: true
+      SETONIXREG_PASS:
+        required: false
+
+jobs:
+  push_private:
+    runs-on: ${{ inputs.runner_label }}
+    strategy:
+      matrix: ${{ fromJson(inputs.build_matrix) }}
+      fail-fast: false
+    env:
+      IMAGE_NAME: ${{ inputs.image_name }}
+      VERSION: ${{ inputs.version }}
+      BUCKET: ${{ vars.ACACIA_BUCKETNAME }}
+    steps:
+    - name: Display registry environment
+      run: |
+        echo "Hostname: $(hostname)"
+        echo "Pushing: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
+        echo "Variant #${{ matrix.index }}"
+
+    - name: Configure podman environment
+      run: |
+        echo "Setting up container environment variables for push..."
+
+        # Export environment variables (same as BUILD-job)
+        export XDG_DATA_HOME=/container/${USER}/data
+        export XDG_RUNTIME_DIR=/container/${USER}/runtime
+        export TMPDIR=/container/${USER}/tmp/
+
+        # Create required directories
+        mkdir -p ${XDG_DATA_HOME}
+        mkdir -p ${XDG_RUNTIME_DIR}
+        mkdir -p ${TMPDIR}
+
+        echo "Push environment setup completed:"
+        echo "XDG_DATA_HOME: ${XDG_DATA_HOME}"
+        echo "XDG_RUNTIME_DIR: ${XDG_RUNTIME_DIR}"
+        echo "TMPDIR: ${TMPDIR}"
+
+        # Set environment variables for subsequent steps
+        echo "XDG_DATA_HOME=${XDG_DATA_HOME}" >> $GITHUB_ENV
+        echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> $GITHUB_ENV
+        echo "TMPDIR=${TMPDIR}" >> $GITHUB_ENV
+
+    - name: Download archive from S3
+      id: locate_archive
+      uses: ./.github/actions/setup-rclone
+      with:
+        access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+        secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+        endpoint: https://projects.pawsey.org.au
+        bucket: ${{ env.BUCKET }}
+        destination_path: ${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar
+        download_mode: true
+        dockerfile_name: ${{ env.IMAGE_NAME }}
+        version: ${{ env.VERSION }}
+        load_to_podman: false
+
+    - name: Push to Setonix private registry
+      if: inputs.setonixreg_available == 'true'
+      continue-on-error: true
+      run: |
+        set +e  # Don't exit on errors to allow independent execution
+        echo "=========================================="
+        echo " Setonix Registry Push Process"
+        echo "=========================================="
+
+        # Load image from archive first
+        echo "📦 Loading image from archive..."
+        archive_file="${{ steps.locate_archive.outputs.archive_name }}"
+        if podman load -i "$archive_file"; then
+          echo "✓ Image loaded successfully from archive"
+        else
+          echo "✗ Failed to load image from archive"
+          exit 1
+        fi
+
+        # Login to Setonix Registry
+        echo "🔐 Logging into Setonix Registry..."
+        if podman login https://setonix-registry.pawsey.org.au -u "${{ vars.SETONIXREG_USERNAME }}" -p "${{ secrets.SETONIXREG_PASS }}"; then
+          echo "✓ Setonix Registry login successful"
+        else
+          echo "✗ Setonix Registry login failed"
+          exit 1
+        fi
+
+        # Get private targets from manifest and use the first one as username
+        private_targets='${{ inputs.private_targets }}'
+        private_username=$(echo "$private_targets" | jq -r '.[0] // empty')
+
+        if [ -z "$private_username" ] || [ "$private_username" = "null" ]; then
+          echo "Error: No private targets found in manifest"
+          exit 1
+        fi
+
+        # Tag and push (IMAGE_NAME already includes variant suffix from BUILD-job)
+        image_tag="${IMAGE_NAME}:${VERSION}"
+        setonix_tag="setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}"
+
+        echo ""
+        echo "🏷️  Tagging image for Setonix Registry:"
+        echo "   Source: $image_tag"
+        echo "   Target: $setonix_tag"
+
+        if podman tag "$image_tag" "$setonix_tag"; then
+          echo "✓ Image tagged successfully"
+        else
+          echo "✗ Image tagging failed"
+          exit 1
+        fi
+
+        echo ""
+        echo "📤 Pushing to Setonix Registry..."
+        if podman push "$setonix_tag"; then
+          echo "✅ Successfully pushed to Setonix Registry: $setonix_tag"
+        else
+          echo "❌ Failed to push to Setonix Registry"
+          exit 1
+        fi
+
+        # Cleanup local tagged image
+        echo ""
+        echo "🧹 Cleaning up local Setonix tagged image..."
+        podman rmi "$setonix_tag" 2>/dev/null || echo "  (Setonix tag already removed or not found)"
+        podman rmi "$image_tag" 2>/dev/null || echo "  (Base image already removed or not found)"
