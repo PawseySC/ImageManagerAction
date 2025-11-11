@@ -148,7 +148,7 @@ jobs:
 
           # Simple 2-tier configuration
           if [ "$CPU_CORES" -gt 8 ]; then
-            JOBS="16"  # High-core systems
+            JOBS="32"  # High-core systems
           else
             JOBS="4"   # Standard systems (8 cores and below)
           fi
