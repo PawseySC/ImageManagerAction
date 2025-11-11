@@ -1,0 +1,402 @@
+name: Reusable — SUMMARY
+
+on:
+  workflow_call:
+    inputs:
+      main:
+        required: true
+        type: string
+      feature:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      platform:
+        required: true
+        type: string
+      correlation_id:
+        required: true
+        type: string
+      has_template:
+        required: true
+        type: string
+      variant_count:
+        required: true
+        type: string
+      build_matrix:
+        required: true
+        type: string
+      image_name:
+        required: true
+        type: string
+      result_prepare:
+        required: true
+        type: string
+      result_build:
+        required: true
+        type: string
+      result_scan:
+        required: true
+        type: string
+      result_push_priv:
+        required: true
+        type: string
+      result_push_public:
+        required: true
+        type: string
+      result_deploy:
+        required: true
+        type: string
+      targets:
+        required: true
+        type: string
+      private_targets:
+        required: true
+        type: string
+      quayio_available:
+        required: true
+        type: string
+      setonixreg_available:
+        required: true
+        type: string
+      acacia_bucket:
+        required: true
+        type: string
+      acacia_sif_bucket:
+        required: true
+        type: string
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    env:
+      MAIN: ${{ inputs.main }}
+      FEATURE: ${{ inputs.feature }}
+      VERSION: ${{ inputs.version }}
+      PLATFORM: ${{ inputs.platform }}
+      CORRELATION_ID: ${{ inputs.correlation_id }}
+      VARIANT_COUNT: ${{ inputs.variant_count }}
+      HAS_TEMPLATE: ${{ inputs.has_template }}
+    steps:
+      - name: Checkout for template access
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Generate variant block
+        id: variant_block
+        run: |
+          if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
+            cat > /tmp/variant_block.txt <<EOF
+          ## 🔀 Multi-Variant Build
+
+          **Variant Count:** ${{ env.VARIANT_COUNT }}
+
+          Matrix configuration generated ${{ env.VARIANT_COUNT }} build variant(s) based on template parameters.
+          EOF
+          else
+            # No variant block for single builds
+            echo "" > /tmp/variant_block.txt
+          fi
+
+      - name: Generate archive block
+        id: archive_block
+        run: |
+          IMAGE_NAME="${MAIN}-${FEATURE}"
+
+          if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
+            cat > /tmp/archive_block.txt <<'BLOCK_EOF'
+          > **Note:** This build produced ${{ env.VARIANT_COUNT }} variant(s). Each variant has separate Docker archive and SIF files.
+
+          **Docker Archives** (`s3://${{ inputs.acacia_bucket }}/`):
+          BLOCK_EOF
+
+            # Parse matrix and compute variant_suffix for each variant (lowercase for container compatibility)
+            matrix_json='${{ inputs.build_matrix }}'
+            while read variant; do
+              echo "- \`${IMAGE_NAME}${variant}_${VERSION}.tar\`" >> /tmp/archive_block.txt
+            done < <(echo "$matrix_json" | jq -r '.include[] |
+              .values |
+              to_entries |
+              map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
+              join("")')
+
+            echo "" >> /tmp/archive_block.txt
+            echo "**Singularity SIF Files** (\`s3://${{ inputs.acacia_sif_bucket }}/\`):" >> /tmp/archive_block.txt
+            while read variant; do
+              echo "- \`${IMAGE_NAME}${variant}_${VERSION}.sif\`" >> /tmp/archive_block.txt
+            done < <(echo "$matrix_json" | jq -r '.include[] |
+              .values |
+              to_entries |
+              map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
+              join("")')
+          else
+            cat > /tmp/archive_block.txt <<EOF
+          | Location | Address | Status |
+          |----------|---------|--------|
+          EOF
+
+            # S3 Docker Archive Storage
+            if [ "${{ inputs.result_build }}" = "success" ]; then
+              echo "| S3 Docker Archive | \`s3://${{ inputs.acacia_bucket }}/${IMAGE_NAME}_${VERSION}.tar\` | ✅ Uploaded |" >> /tmp/archive_block.txt
+            else
+              echo "| S3 Docker Archive | \`s3://${{ inputs.acacia_bucket }}/${IMAGE_NAME}_${VERSION}.tar\` | ❌ Failed |" >> /tmp/archive_block.txt
+            fi
+
+            # S3 Singularity SIF Storage
+            if [ "${{ inputs.result_build }}" = "success" ]; then
+              echo "| S3 Singularity SIF | \`s3://${{ inputs.acacia_sif_bucket }}/${IMAGE_NAME}_${VERSION}.sif\` | ✅ Uploaded |" >> /tmp/archive_block.txt
+            else
+              echo "| S3 Singularity SIF | \`s3://${{ inputs.acacia_sif_bucket }}/${IMAGE_NAME}_${VERSION}.sif\` | ❌ Failed |" >> /tmp/archive_block.txt
+            fi
+          fi
+
+      - name: Generate registry block
+        id: registry_block
+        run: |
+          IMAGE_NAME="${MAIN}-${FEATURE}"
+
+          if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
+            cat > /tmp/registry_block.txt <<EOF
+          > **Note:** Each of the ${{ env.VARIANT_COUNT }} variant(s) has been pushed to the configured registries.
+
+          EOF
+
+            # Parse configured targets
+            targets='${{ inputs.targets }}'
+            private_targets='${{ inputs.private_targets }}'
+            private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
+            matrix_json='${{ inputs.build_matrix }}'
+
+            # Setonix Private Registry
+            if [ "${{ inputs.setonixreg_available }}" = "true" ]; then
+              echo "### Setonix Private Registry" >> /tmp/registry_block.txt
+              echo "" >> /tmp/registry_block.txt
+              while read variant; do
+                echo "- \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}${variant}:${VERSION}\`" >> /tmp/registry_block.txt
+              done < <(echo "$matrix_json" | jq -r '.include[] |
+                .values |
+                to_entries |
+                map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
+                join("")')
+              echo "" >> /tmp/registry_block.txt
+            fi
+
+            # Quay.io
+            if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ inputs.quayio_available }}" = "true" ]; then
+              echo "### Quay.io Public Registry" >> /tmp/registry_block.txt
+              echo "" >> /tmp/registry_block.txt
+              while read variant; do
+                echo "- \`quay.io/pawsey/${IMAGE_NAME}${variant}:${VERSION}\`" >> /tmp/registry_block.txt
+              done < <(echo "$matrix_json" | jq -r '.include[] |
+                .values |
+                to_entries |
+                map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
+                join("")')
+              echo "" >> /tmp/registry_block.txt
+            fi
+
+            # Setonix Public
+            if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1 && [ "${{ inputs.setonixreg_available }}" = "true" ]; then
+              echo "### Setonix Public Registry" >> /tmp/registry_block.txt
+              echo "" >> /tmp/registry_block.txt
+              while read variant; do
+                echo "- \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}${variant}:${VERSION}\`" >> /tmp/registry_block.txt
+              done < <(echo "$matrix_json" | jq -r '.include[] |
+                .values |
+                to_entries |
+                map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
+                join("")')
+              echo "" >> /tmp/registry_block.txt
+            fi
+          else
+            cat > /tmp/registry_block.txt <<EOF
+          | Registry | Address | Status |
+          |----------|---------|--------|
+          EOF
+
+            # Parse configured targets
+            targets='${{ inputs.targets }}'
+
+            # Setonix Private Registry (always attempted if credentials available)
+            private_targets='${{ inputs.private_targets }}'
+            private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
+            if [ "${{ inputs.setonixreg_available }}" = "true" ] && [ "${{ inputs.result_push_priv }}" = "success" ]; then
+              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |" >> /tmp/registry_block.txt
+            elif [ "${{ inputs.setonixreg_available }}" = "true" ]; then
+              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |" >> /tmp/registry_block.txt
+            else
+              echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ⏭️ Skipped (No credentials) |" >> /tmp/registry_block.txt
+            fi
+
+            # Quay.io (only if in targets)
+            if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1; then
+              if [ "${{ inputs.quayio_available }}" = "true" ] && [ "${{ inputs.result_push_public }}" = "success" ]; then
+                echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |" >> /tmp/registry_block.txt
+              elif [ "${{ inputs.quayio_available }}" = "true" ]; then
+                echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |" >> /tmp/registry_block.txt
+              else
+                echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Skipped (No credentials) |" >> /tmp/registry_block.txt
+              fi
+            else
+              echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Not in targets |" >> /tmp/registry_block.txt
+            fi
+
+            # Setonix Public Registry (only if in targets)
+            if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1; then
+              if [ "${{ inputs.setonixreg_available }}" = "true" ] && [ "${{ inputs.result_push_public }}" = "success" ]; then
+                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |" >> /tmp/registry_block.txt
+              elif [ "${{ inputs.setonixreg_available }}" = "true" ]; then
+                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |" >> /tmp/registry_block.txt
+              else
+                echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Skipped (No credentials) |" >> /tmp/registry_block.txt
+              fi
+            else
+              echo "| Setonix Public | \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Not in targets |" >> /tmp/registry_block.txt
+            fi
+          fi
+
+      - name: Generate SHPC block
+        id: shpc_block
+        run: |
+          IMAGE_NAME="${MAIN}-${FEATURE}"
+
+          # SHPC deployment status
+          if [ "${{ inputs.result_deploy }}" = "success" ]; then
+            # Use Quay.io for SHPC deployment
+            targets='${{ inputs.targets }}'
+            if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ inputs.quayio_available }}" = "true" ]; then
+              if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
+                cat > /tmp/shpc_block.txt <<EOF
+          > **Note:** Each of the ${{ env.VARIANT_COUNT }} variant(s) has been deployed to SHPC registry.
+
+          **SHPC Registry Path:** \`/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry/quay.io/pawsey/${IMAGE_NAME}/\`
+
+          **Available Variants:**
+          EOF
+                matrix_json='${{ inputs.build_matrix }}'
+                while read variant; do
+                  echo "- \`quay.io/pawsey/${IMAGE_NAME}${variant}:${VERSION}\`" >> /tmp/shpc_block.txt
+                done < <(echo "$matrix_json" | jq -r '.include[] |
+                  .values |
+                  to_entries |
+                  map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
+                  join("")')
+                echo "" >> /tmp/shpc_block.txt
+                echo "### SHPC Usage Commands" >> /tmp/shpc_block.txt
+                echo "" >> /tmp/shpc_block.txt
+                echo "Load and use a specific variant via SHPC:" >> /tmp/shpc_block.txt
+                echo "\`\`\`bash" >> /tmp/shpc_block.txt
+                echo "# Load SHPC module" >> /tmp/shpc_block.txt
+                echo "module load shpc/0.1.32" >> /tmp/shpc_block.txt
+                echo "" >> /tmp/shpc_block.txt
+                echo "# List available variants" >> /tmp/shpc_block.txt
+                first_variant=$(echo "$matrix_json" | jq -r '.include[0].values | to_entries | map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) | join("")')
+                first_variant_name="${IMAGE_NAME}${first_variant}"
+                echo "shpc show quay.io/pawsey/${first_variant_name}" >> /tmp/shpc_block.txt
+                echo "" >> /tmp/shpc_block.txt
+                echo "# Install a specific variant (example with first variant)" >> /tmp/shpc_block.txt
+                echo "shpc install quay.io/pawsey/${first_variant_name}:${VERSION}" >> /tmp/shpc_block.txt
+                echo "" >> /tmp/shpc_block.txt
+                echo "# Use the container" >> /tmp/shpc_block.txt
+                echo "shpc run quay.io/pawsey/${first_variant_name}:${VERSION} <command>" >> /tmp/shpc_block.txt
+                echo "\`\`\`" >> /tmp/shpc_block.txt
+              else
+                shpc_image="quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
+                cat > /tmp/shpc_block.txt <<EOF
+          | Registry Path | Image Source | Status |
+          |---------------|--------------|--------|
+          | \`/software/setonix/2025.08/pawsey/software/shpc/pawsey_registry/quay.io/pawsey/${IMAGE_NAME}/\` | \`$shpc_image\` | ✅ Deployed |
+
+          ### SHPC Usage Commands
+
+          Load and use the container via SHPC:
+          \`\`\`bash
+          # Load SHPC module
+          module load shpc/0.1.32
+
+          # Install the container
+          shpc install $shpc_image
+
+          # Show available commands
+          shpc show $shpc_image
+
+          # Use the container
+          shpc run $shpc_image <command>
+          \`\`\`
+          EOF
+              fi
+            fi
+          elif [ "${{ inputs.result_deploy }}" = "failure" ]; then
+            echo "| SHPC Registry | N/A | ❌ Deployment Failed |" > /tmp/shpc_block.txt
+          elif [ "${{ inputs.result_deploy }}" = "skipped" ]; then
+            echo "| SHPC Registry | N/A | ⏭️ Skipped (shpc=false or Quay.io not available or platform=arm) |" > /tmp/shpc_block.txt
+          else
+            echo "| SHPC Registry | N/A | ⏸️ Not Executed |" > /tmp/shpc_block.txt
+          fi
+
+      - name: Generate job results block
+        id: job_results_block
+        run: |
+          cat > /tmp/job_results_block.txt <<EOF
+          | Job | Status |
+          |-----|--------|
+          | PREPARE | ${{ inputs.result_prepare == 'success' && '✅ Success' || '❌ Failed' }} |
+          | BUILD | ${{ inputs.result_build == 'success' && '✅ Success' || '❌ Failed' }} |
+          | SCAN-AND-REPORT | ${{ inputs.result_scan == 'success' && '✅ Success' || (inputs.result_scan == 'skipped' && '⏭️ Skipped (noscan=true)') || '❌ Failed' }} |
+          | PUSH-PRIV | ${{ inputs.result_push_priv == 'success' && '✅ Success' || '❌ Failed' }} |
+          | PUSH-PUBLIC | ${{ inputs.result_push_public == 'success' && '✅ Success' || '❌ Failed' }} |
+          | DEPLOY | ${{ inputs.result_deploy == 'success' && '✅ Success' || (inputs.result_deploy == 'skipped' && '⏭️ Skipped') || '❌ Failed' }} |
+          EOF
+
+      - name: Render summary from template
+        run: |
+          IMAGE_NAME="${MAIN}-${FEATURE}"
+          TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S UTC')
+          BRANCH="${{ github.ref_name }}"
+
+          # Create environment for envsubst
+          export IMAGE_NAME VERSION MAIN FEATURE PLATFORM CORRELATION_ID BRANCH TIMESTAMP
+
+          # First pass: substitute simple scalar values
+          cat .github/templates/summary_template.md | \
+            sed "s|__IMAGE_NAME__|${IMAGE_NAME}|g" | \
+            sed "s|__VERSION__|${VERSION}|g" | \
+            sed "s|__MAIN__|${MAIN}|g" | \
+            sed "s|__FEATURE__|${FEATURE}|g" | \
+            sed "s|__PLATFORM__|${PLATFORM}|g" | \
+            sed "s|__CORRELATION_ID__|${CORRELATION_ID}|g" | \
+            sed "s|__BRANCH__|${BRANCH}|g" | \
+            sed "s|__TIMESTAMP__|${TIMESTAMP}|g" > /tmp/summary_step1.md
+
+          # Second pass: insert multi-line blocks
+          sed -e '/__VARIANT_BLOCK__/{
+            r /tmp/variant_block.txt
+            d
+          }' /tmp/summary_step1.md > /tmp/summary_step2.md
+
+          sed -e '/__ARCHIVE_BLOCK__/{
+            r /tmp/archive_block.txt
+            d
+          }' /tmp/summary_step2.md > /tmp/summary_step3.md
+
+          sed -e '/__REGISTRY_BLOCK__/{
+            r /tmp/registry_block.txt
+            d
+          }' /tmp/summary_step3.md > /tmp/summary_step4.md
+
+          sed -e '/__SHPC_BLOCK__/{
+            r /tmp/shpc_block.txt
+            d
+          }' /tmp/summary_step4.md > /tmp/summary_step5.md
+
+          sed -e '/__JOB_RESULTS_BLOCK__/{
+            r /tmp/job_results_block.txt
+            d
+          }' /tmp/summary_step5.md > /tmp/summary_final.md
+
+          # Append final rendered summary to workflow summary
+          cat /tmp/summary_final.md >> $GITHUB_STEP_SUMMARY
+
+          echo "✅ Summary rendered and published"

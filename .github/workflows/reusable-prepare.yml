@@ -1,0 +1,438 @@
+name: Reusable — PREPARE
+
+on:
+  workflow_call:
+    secrets:
+      PAT_TOKEN:
+        required: false
+      DOCKERHUB_TOKEN:
+        required: false
+      QUAYIO_TOKEN:
+        required: false
+      SETONIXREG_PASS:
+        required: false
+      ACACIA_ACCESS_KEY_ID:
+        required: false
+      ACACIA_SECRET_ACCESS_KEY:
+        required: false
+    outputs:
+      proceed_valid:
+        description: "Whether to proceed with build"
+        value: ${{ jobs.prepare.outputs.proceed_valid }}
+      main:
+        description: "Main software name"
+        value: ${{ jobs.prepare.outputs.main }}
+      feature:
+        description: "Feature name"
+        value: ${{ jobs.prepare.outputs.feature }}
+      version:
+        description: "Version number"
+        value: ${{ jobs.prepare.outputs.version }}
+      devmode:
+        description: "Development mode flag"
+        value: ${{ jobs.prepare.outputs.devmode }}
+      noscan:
+        description: "Skip security scan flag"
+        value: ${{ jobs.prepare.outputs.noscan }}
+      platform:
+        description: "Target platform (x86/arm)"
+        value: ${{ jobs.prepare.outputs.platform }}
+      shpc:
+        description: "SHPC deployment flag"
+        value: ${{ jobs.prepare.outputs.shpc }}
+      targets:
+        description: "JSON array of target registries"
+        value: ${{ jobs.prepare.outputs.targets }}
+      private_targets:
+        description: "JSON array of private target registries"
+        value: ${{ jobs.prepare.outputs.private_targets }}
+      branch_path:
+        description: "Directory path based on branch"
+        value: ${{ jobs.prepare.outputs.branch_path }}
+      dockerfile_path:
+        description: "Path to Dockerfile"
+        value: ${{ jobs.prepare.outputs.dockerfile_path }}
+      correlation_id:
+        description: "Unique ID for tracking"
+        value: ${{ jobs.prepare.outputs.correlation_id }}
+      date:
+        description: "Date tag"
+        value: ${{ jobs.prepare.outputs.date }}
+      dockerhub_available:
+        description: "Whether Docker Hub credentials are available"
+        value: ${{ jobs.prepare.outputs.dockerhub_available }}
+      quayio_available:
+        description: "Whether Quay.io credentials are available"
+        value: ${{ jobs.prepare.outputs.quayio_available }}
+      setonixreg_available:
+        description: "Whether Setonix Registry credentials are available"
+        value: ${{ jobs.prepare.outputs.setonixreg_available }}
+      build_matrix:
+        description: "JSON matrix configuration for multi-variant builds"
+        value: ${{ jobs.prepare.outputs.build_matrix }}
+      has_template:
+        description: "Whether template field exists in manifest"
+        value: ${{ jobs.prepare.outputs.has_template }}
+      variant_count:
+        description: "Number of build variants"
+        value: ${{ jobs.prepare.outputs.variant_count }}
+      runner_label:
+        description: "Runner label based on platform"
+        value: ${{ jobs.prepare.outputs.runner_label }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      proceed_valid: ${{ steps.validate_manifest.outputs.proceed_valid }}
+      main: ${{ steps.validate_manifest.outputs.main }}
+      feature: ${{ steps.validate_manifest.outputs.feature }}
+      version: ${{ steps.validate_manifest.outputs.version }}
+      devmode: ${{ steps.validate_manifest.outputs.devmode }}
+      noscan: ${{ steps.validate_manifest.outputs.noscan }}
+      platform: ${{ steps.validate_manifest.outputs.platform }}
+      shpc: ${{ steps.validate_manifest.outputs.shpc }}
+      targets: ${{ steps.validate_manifest.outputs.targets }}
+      private_targets: ${{ steps.validate_manifest.outputs.private_targets }}
+      branch_path: ${{ steps.validate_manifest.outputs.branch_path }}
+      dockerfile_path: ${{ steps.validate_manifest.outputs.dockerfile_path }}
+      correlation_id: ${{ steps.validate_manifest.outputs.correlation_id }}
+      date: ${{ steps.date.outputs.date }}
+      dockerhub_available: ${{ steps.check_vars_secrets.outputs.dockerhub_available }}
+      quayio_available: ${{ steps.check_vars_secrets.outputs.quayio_available }}
+      setonixreg_available: ${{ steps.check_vars_secrets.outputs.setonixreg_available }}
+      build_matrix: ${{ steps.process_template.outputs.matrix }}
+      has_template: ${{ steps.process_template.outputs.has_template }}
+      variant_count: ${{ steps.process_template.outputs.variant_count }}
+      runner_label: ${{ steps.choose_runner.outputs.runner_label }}
+
+    steps:
+      - name: Initialize runner configuration
+        id: set_default_runner_label
+        run: |
+          echo "runner_label=ubuntu-latest" >> $GITHUB_OUTPUT
+
+      - name: Validate environment credentials
+        id: check_vars_secrets
+        run: |
+          missing_vars=()
+          missing_secrets=()
+
+          # check Variables
+          if [ -z "${{ vars.DOCKERHUB_USERNAME }}" ]; then
+            missing_vars+=("DOCKERHUB_USERNAME")
+          fi
+
+          if [ -z "${{ vars.QUAYIO_USERNAME }}" ]; then
+            missing_vars+=("QUAYIO_USERNAME")
+          fi
+
+          if [ -z "${{ vars.SETONIXREG_USERNAME }}" ]; then
+            missing_vars+=("SETONIXREG_USERNAME")
+          fi
+
+          if [ -z "${{ vars.ACACIA_BUCKETNAME }}" ]; then
+            missing_vars+=("ACACIA_BUCKETNAME")
+          fi
+
+          if [ -z "${{ vars.ACACIA_SIF_BUCKETNAME }}" ]; then
+            missing_vars+=("ACACIA_SIF_BUCKETNAME")
+          fi
+
+          # check Secrets
+          if [ -z "${{ secrets.PAT_TOKEN }}" ]; then
+            missing_secrets+=("PAT_TOKEN")
+          fi
+
+          if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            missing_secrets+=("DOCKERHUB_TOKEN")
+          fi
+
+          if [ -z "${{ secrets.QUAYIO_TOKEN }}" ]; then
+            missing_secrets+=("QUAYIO_TOKEN")
+          fi
+
+          if [ -z "${{ secrets.SETONIXREG_PASS }}" ]; then
+            missing_secrets+=("SETONIXREG_PASS")
+          fi
+
+          if [ -z "${{ secrets.ACACIA_ACCESS_KEY_ID }}" ]; then
+            missing_secrets+=("ACACIA_ACCESS_KEY_ID")
+          fi
+
+          if [ -z "${{ secrets.ACACIA_SECRET_ACCESS_KEY }}" ]; then
+            missing_secrets+=("ACACIA_SECRET_ACCESS_KEY")
+          fi
+
+          # Log status of variables and secrets
+          if [ ${#missing_vars[@]} -ne 0 ]; then
+            echo "Missing Variables: ${missing_vars[@]}"
+          else
+            echo "All required variables are set."
+          fi
+
+          if [ ${#missing_secrets[@]} -ne 0 ]; then
+            echo "Missing Secrets: ${missing_secrets[@]}"
+          else
+            echo "All required secrets are set."
+          fi
+
+          # Set output flags for conditional job execution
+          dockerhub_available=$( [ -n "${{ vars.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ] && echo 'true' || echo 'false' )
+          quayio_available=$( [ -n "${{ vars.QUAYIO_USERNAME }}" ] && [ -n "${{ secrets.QUAYIO_TOKEN }}" ] && echo 'true' || echo 'false' )
+          setonixreg_available=$( [ -n "${{ vars.SETONIXREG_USERNAME }}" ] && [ -n "${{ secrets.SETONIXREG_PASS }}" ] && echo 'true' || echo 'false' )
+
+          echo "dockerhub_available=$dockerhub_available" >> $GITHUB_OUTPUT
+          echo "quayio_available=$quayio_available" >> $GITHUB_OUTPUT
+          echo "setonixreg_available=$setonixreg_available" >> $GITHUB_OUTPUT
+
+          # Log registry availability status
+          echo ""
+          echo "=== Registry Credentials Check ==="
+          if [ "$dockerhub_available" = "true" ]; then
+            echo "[✓] Docker Hub: Credentials available"
+          else
+            echo "[✗] Docker Hub: Missing credentials (DOCKERHUB_USERNAME or DOCKERHUB_TOKEN)"
+          fi
+
+          if [ "$quayio_available" = "true" ]; then
+            echo "[✓] Quay.io: Credentials available"
+          else
+            echo "[✗] Quay.io: Missing credentials (QUAYIO_USERNAME or QUAYIO_TOKEN)"
+          fi
+
+          if [ "$setonixreg_available" = "true" ]; then
+            echo "[✓] Setonix Registry: Credentials available"
+          else
+            echo "[✗] Setonix Registry: Missing credentials (SETONIXREG_USERNAME or SETONIXREG_PASS)"
+          fi
+          echo "==================================="
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1  # Only need current commit for manifest-based workflow
+
+      - name: Determine branch directory path
+        id: parse_branch
+        run: |
+          # Extract main and feature from branch name
+          # Supports formats: cicd-main/feature or cicd-main-feature
+          branch_name="${{ github.ref_name }}"
+          echo "Branch name: $branch_name"
+
+          if [[ ! "$branch_name" =~ ^cicd- ]]; then
+            echo "Error: Branch name must start with 'cicd-'"
+            exit 1
+          fi
+
+          # Remove 'cicd-' prefix
+          path_part="${branch_name#cicd-}"
+          echo "Path part after removing 'cicd-': $path_part"
+
+          # Check if path_part contains a forward slash (preferred format: cicd-main/feature)
+          if [[ "$path_part" == *"/"* ]]; then
+            # Format: cicd-main/feature -> main/feature
+            branch_path="$path_part"
+            echo "✓ Using slash-separated format: $branch_path"
+          else
+            # Fallback: try to parse cicd-main-feature format
+            # This is less reliable but maintained for backwards compatibility
+            echo "⚠️  Using legacy dash-separated format, consider using cicd-main/feature instead"
+            branch_path="$path_part"
+          fi
+
+          echo "Final branch path: $branch_path"
+          echo "branch_path=$branch_path" >> $GITHUB_OUTPUT
+
+      - name: Validate manifest and extract configuration
+        id: validate_manifest
+        run: |
+          branch_path="${{ steps.parse_branch.outputs.branch_path }}"
+          manifest_file="${branch_path}/manifest.json"
+
+          echo "Looking for manifest at: $manifest_file"
+          echo "Searching for Dockerfile variants in: $branch_path"
+
+          # Check if manifest.json exists
+          if [ ! -f "$manifest_file" ]; then
+            echo "Error: manifest.json not found at $manifest_file"
+            echo "This workflow requires a manifest.json file in the branch directory."
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Find Dockerfile with case-insensitive search and various extensions
+          dockerfile_found=""
+          dockerfile_patterns=(
+            "${branch_path}/Dockerfile"
+            "${branch_path}/dockerfile"
+            "${branch_path}/"*.dockerfile
+            "${branch_path}/"*.Dockerfile
+            "${branch_path}/"*.[Dd]ockerfile
+          )
+
+          echo "Searching for Dockerfile with patterns:"
+          for pattern in "${dockerfile_patterns[@]}"; do
+            echo "  - $pattern"
+            for file in $pattern; do
+              if [ -f "$file" ]; then
+                dockerfile_found="$file"
+                echo "✓ Found Dockerfile: $dockerfile_found"
+                break 2
+              fi
+            done
+          done
+
+          # Check if any Dockerfile variant was found
+          if [ -z "$dockerfile_found" ]; then
+            echo "Error: No Dockerfile found in $branch_path"
+            echo "Searched for: Dockerfile, dockerfile, *.dockerfile, *.Dockerfile, *.[Dd]ockerfile"
+            echo "This workflow requires a Dockerfile in the branch directory."
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          dockerfile_path="$dockerfile_found"
+          echo "Using Dockerfile: $dockerfile_path"
+
+          echo "✓ Found manifest.json and Dockerfile"
+
+          # Parse and validate manifest.json
+          echo "Parsing manifest.json..."
+
+          # Extract configuration using jq
+          main=$(jq -r '.main // empty' "$manifest_file")
+          feature=$(jq -r '.feature // empty' "$manifest_file")
+          version=$(jq -r '.version // empty' "$manifest_file")
+          devmode=$(jq -r '.devmode // false' "$manifest_file")
+          noscan=$(jq -r '.noscan // false' "$manifest_file")
+          platform=$(jq -r '.platform // "x86"' "$manifest_file")
+          shpc=$(jq -r '.shpc // false' "$manifest_file")
+          targets=$(jq -c '.targets // []' "$manifest_file")
+          private_targets=$(jq -c '."private-targets" // []' "$manifest_file")
+          correlation_id=$(jq -r '.metadata.correlation_id // empty' "$manifest_file")
+
+          # Validate required fields
+          if [ -z "$main" ] || [ "$main" = "null" ]; then
+            echo "Error: Missing 'main' field in manifest.json"
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          if [ -z "$feature" ] || [ "$feature" = "null" ]; then
+            echo "Error: Missing 'feature' field in manifest.json"
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "Error: Missing 'version' field in manifest.json"
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Validate version format (semver X.Y.Z)
+          if ! echo "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: Invalid version format '$version'. Expected X.Y.Z"
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Validate platform
+          if [ "$platform" != "x86" ] && [ "$platform" != "arm" ]; then
+            echo "Error: Invalid platform '$platform'. Expected 'x86' or 'arm'"
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Validate targets array
+          if [ "$targets" = "[]" ] || [ "$targets" = "null" ]; then
+            echo "Warning: No targets specified in manifest.json"
+          fi
+
+          # Validate branch path matches manifest
+          expected_path="${main}/${feature}"
+          if [ "$branch_path" != "$expected_path" ]; then
+            echo "Error: Branch path '$branch_path' doesn't match manifest main/feature '$expected_path'"
+            echo "proceed_valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "✓ Manifest validation passed"
+
+          # Add platform suffix to version for multi-architecture support
+          # Original version from manifest: X.Y.Z
+          # Final version with platform: X.Y.Z-arm or X.Y.Z-x86
+          version_with_platform="${version}-${platform}"
+
+          echo ""
+          echo "=== Configuration Summary ==="
+          echo "Main: $main"
+          echo "Feature: $feature"
+          echo "Version (from manifest): $version"
+          echo "Version (with platform): $version_with_platform"
+          echo "Dev Mode: $devmode"
+          echo "No Scan: $noscan"
+          echo "Platform: $platform"
+          echo "SHPC Deploy: $shpc"
+          echo "Targets: $targets"
+          echo "Private Targets: $private_targets"
+          echo "Correlation ID: $correlation_id"
+          echo "Branch Path: $branch_path"
+          echo "Dockerfile: $dockerfile_path"
+          echo "============================"
+
+          # Set outputs (use version_with_platform for all downstream jobs)
+          echo "proceed_valid=true" >> $GITHUB_OUTPUT
+          echo "main=$main" >> $GITHUB_OUTPUT
+          echo "feature=$feature" >> $GITHUB_OUTPUT
+          echo "version=$version_with_platform" >> $GITHUB_OUTPUT
+          echo "devmode=$devmode" >> $GITHUB_OUTPUT
+          echo "noscan=$noscan" >> $GITHUB_OUTPUT
+          echo "platform=$platform" >> $GITHUB_OUTPUT
+          echo "shpc=$shpc" >> $GITHUB_OUTPUT
+          echo "targets=$targets" >> $GITHUB_OUTPUT
+          echo "private_targets=$private_targets" >> $GITHUB_OUTPUT
+          echo "branch_path=$branch_path" >> $GITHUB_OUTPUT
+          echo "dockerfile_path=$dockerfile_path" >> $GITHUB_OUTPUT
+          echo "correlation_id=$correlation_id" >> $GITHUB_OUTPUT
+
+      - name: Decide runner by platform
+        id: choose_runner
+        if: steps.validate_manifest.outputs.proceed_valid == 'true'
+        run: |
+          platform="${{ steps.validate_manifest.outputs.platform }}"
+          if [ "$platform" = "arm" ]; then
+            echo "runner_label=ella-n003" >> $GITHUB_OUTPUT
+          else
+            echo "runner_label=setonix-podman02" >> $GITHUB_OUTPUT
+          fi
+          echo "Selected runner: $([ "$platform" = "arm" ] && echo "ella-n003" || echo "setonix-podman02") for platform: $platform"
+
+      - name: Generate date tag
+        if: steps.validate_manifest.outputs.proceed_valid == 'true'
+        id: date
+        run: |
+          date_tag=$(date +'%m-%d')
+          echo "Date tag: $date_tag"
+          echo "date=$date_tag" >> $GITHUB_OUTPUT
+
+      - name: Process template and generate build matrix
+        if: steps.validate_manifest.outputs.proceed_valid == 'true'
+        id: process_template
+        uses: ./.github/actions/process-template
+        with:
+          manifest_path: ${{ steps.validate_manifest.outputs.branch_path }}/manifest.json
+          dockerfile_path: ${{ steps.validate_manifest.outputs.dockerfile_path }}
+
+      - name: Display build matrix configuration
+        if: steps.validate_manifest.outputs.proceed_valid == 'true'
+        run: |
+          echo "=== Build Matrix Configuration ==="
+          echo "Has template: ${{ steps.process_template.outputs.has_template }}"
+          echo "Variant count: ${{ steps.process_template.outputs.variant_count }}"
+          echo ""
+          echo "Matrix configuration:"
+          echo '${{ steps.process_template.outputs.matrix }}' | jq '.'
+          echo "=================================="

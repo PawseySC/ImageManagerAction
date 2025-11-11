@@ -1,0 +1,31 @@
+{
+  "main": "ex3",
+  "feature": "test4",
+  "version": "0.0.11",
+  "devmode": true,
+  "noscan": true,
+  "platform": "arm",
+  "shpc": true,
+  "template": {
+    "DEBIAN_VERSION": [
+      "stretch",
+      "buster"
+    ],
+    "CURL_ENABLED": "yes"
+  },
+  "targets": [
+    "quay.io"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-ex3/test4",
+    "path": "ex3/test4/"
+  },
+  "metadata": {
+    "timestamp": "2025-09-17T09:21:50.636269Z",
+    "correlation_id": "f3e3a384-9b30-41ae-92f5-7c03653f2374"
+  }
+}

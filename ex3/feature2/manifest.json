@@ -1,0 +1,29 @@
+{
+  "main": "ex3",
+  "feature": "feature2",
+  "version": "0.0.6",
+  "devmode": false,
+  "noscan": false,
+  "platform": "x86",
+  "targets": [],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-ex3/feature2",
+    "path": "ex3/feature2/"
+  },
+  "metadata": {
+    "timestamp": "2025-10-07T02:45:04.843587Z",
+    "correlation_id": "18054926-9ab4-4a3e-a495-9aff4d814075"
+  },
+  "template": {
+    "Var1": [
+      "key1",
+      "key1a",
+      "key1b"
+    ],
+    "Var2": "key2"
+  }
+}

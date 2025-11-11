@@ -1,0 +1,255 @@
+name: Reusable — SCAN AND REPORT
+
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        required: true
+        type: string
+      main:
+        required: true
+        type: string
+      feature:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      has_template:
+        required: true
+        type: string
+      build_matrix:
+        required: true
+        type: string
+      correlation_id:
+        required: true
+        type: string
+    secrets:
+      ACACIA_ACCESS_KEY_ID:
+        required: true
+      ACACIA_SECRET_ACCESS_KEY:
+        required: true
+
+jobs:
+  scan:
+    runs-on: ${{ inputs.runner_label }}
+    strategy:
+      matrix: ${{ fromJson(inputs.build_matrix) }}
+      fail-fast: false
+    env:
+      VERSION: ${{ inputs.version }}
+      REPORT_DIR: ./trivy-reports
+    steps:
+    - name: Compute image name for this variant
+      id: compute_image_name
+      run: |
+        set -euo pipefail
+
+        # Get template values from matrix
+        template_values='${{ toJson(matrix.values) }}'
+        main="${{ inputs.main }}"
+        feature="${{ inputs.feature }}"
+
+        # Compute variant suffix (same logic as BUILD job)
+        if [ "${{ inputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")' | tr '[:upper:]' '[:lower:]')
+        else
+          variant_suffix=""
+        fi
+
+        # Sanitize image name (same logic as BUILD job)
+        image_name_raw="${main}-${feature}${variant_suffix}"
+        image_name=$(echo "$image_name_raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^[.-]*//;s/[.-]*$//')
+
+        echo "IMAGE_NAME=$image_name" >> $GITHUB_ENV
+        echo "Computed image name: $image_name"
+
+    - name: Display scan environment
+      run: |
+          echo "Hostname: $(hostname)"
+          echo "Scanning: ${IMAGE_NAME}:${VERSION}"
+          echo "Variant #${{ matrix.index }}"
+
+    - name: Download archive from S3
+      id: locate
+      uses: ./.github/actions/setup-rclone
+      with:
+        access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+        secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+        endpoint: https://projects.pawsey.org.au
+        bucket: ${{ vars.ACACIA_BUCKETNAME }}
+        destination_path: ${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar
+        download_mode: true
+        dockerfile_name: ${{ env.IMAGE_NAME }}
+        version: ${{ env.VERSION }}
+        load_to_podman: false
+
+    - name: Initialize scan workspace
+      run: |
+        mkdir -p "${REPORT_DIR}"
+        echo "Report directory created: ${REPORT_DIR}"
+
+    # Generate JSON report first
+    - name: Run vulnerability scan (JSON)
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: image
+        input: ./${{ steps.locate.outputs.archive_name }}
+        format: json
+        output: ${{ env.REPORT_DIR }}/scan-results.json
+        severity: CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN
+        ignore-unfixed: true
+        vuln-type: os,library
+        exit-code: '0'
+        hide-progress: true
+        cache: true
+      env:
+        TRIVY_SKIP_DB_UPDATE: false
+        TRIVY_SKIP_JAVA_DB_UPDATE: false
+
+    # Process JSON to create readable summary
+    - name: Process scan results to summary
+      run: |
+        python3 -c "
+        import json
+        import sys
+        import os
+
+        json_file = '${REPORT_DIR}/scan-results.json'
+        output_file = '${REPORT_DIR}/summary.md'
+
+        try:
+            with open(json_file, 'r') as f:
+                data = json.load(f)
+
+            # Initialize counters
+            counts = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0, 'UNKNOWN': 0}
+            vulnerabilities = []
+
+            # Process results
+            if 'Results' in data and data['Results']:
+                for result in data['Results']:
+                    if 'Vulnerabilities' in result and result['Vulnerabilities']:
+                        for vuln in result['Vulnerabilities']:
+                            severity = vuln.get('Severity', 'UNKNOWN')
+                            if severity in counts:
+                                counts[severity] += 1
+                            vulnerabilities.append(vuln)
+
+            # Generate summary
+            with open(output_file, 'w') as f:
+                artifact_name = data.get('ArtifactName', 'Unknown')
+                f.write(f'## Trivy Scan Summary — {artifact_name}\n\n')
+                f.write(f'**Target:** {artifact_name}\n')
+                f.write(f'**Total Vulnerabilities:** {sum(counts.values())}\n\n')
+
+                f.write('### Severity Counts\n')
+                for severity, count in counts.items():
+                    if count > 0:
+                        f.write(f'- **{severity}:** {count}\n')
+                    else:
+                        f.write(f'- {severity}: {count}\n')
+                f.write('\n')
+
+                # Show critical and high details
+                critical_high = [v for v in vulnerabilities if v.get('Severity') in ['CRITICAL', 'HIGH']]
+                if critical_high:
+                    f.write('### Critical & High Severity Vulnerabilities\n\n')
+                    f.write('| Severity | CVE ID | Package | Installed | Fixed |\n')
+                    f.write('|----------|--------|---------|-----------|-------|\n')
+                    for vuln in critical_high[:15]:  # Limit to first 15
+                        severity = vuln.get('Severity', 'N/A')
+                        cve_id = vuln.get('VulnerabilityID', 'N/A')
+                        pkg = vuln.get('PkgName', 'N/A')
+                        installed = vuln.get('InstalledVersion', 'N/A')
+                        fixed = vuln.get('FixedVersion', 'N/A') or '❌'
+                        f.write(f'| {severity} | {cve_id} | {pkg} | {installed} | {fixed} |\n')
+
+                    if len(critical_high) > 15:
+                        f.write(f'\n*... and {len(critical_high) - 15} more critical/high vulnerabilities.*\n')
+                elif sum(counts.values()) > 0:
+                    f.write('### Good News! 🎉\n\n')
+                    f.write('No CRITICAL or HIGH severity vulnerabilities found.\n')
+                    if counts['MEDIUM'] > 0:
+                        f.write(f'Only {counts[\"MEDIUM\"]} MEDIUM severity issues detected.\n')
+                else:
+                    f.write('### Excellent! ✅\n\n')
+                    f.write('No vulnerabilities found in this image.\n')
+
+            print(f'Successfully generated summary: {output_file}')
+
+        except Exception as e:
+            with open(output_file, 'w') as f:
+                f.write(f'### ❌ Error Processing Scan Results\n\n')
+                f.write(f'**Error:** {str(e)}\n\n')
+                f.write(f'**JSON file:** {json_file}\n')
+                f.write(f'**File exists:** {os.path.exists(json_file)}\n')
+            print(f'Error: {e}', file=sys.stderr)
+        "
+
+    - name: Debug scan output
+      run: |
+        echo "=== Trivy output file exists? ==="
+        ls -la "${REPORT_DIR}/summary.md" || echo "Summary file not found"
+        echo ""
+        echo "=== Trivy output content ==="
+        cat "${REPORT_DIR}/summary.md" || echo "Cannot read summary file"
+        echo ""
+        echo "=== Report directory contents ==="
+        ls -la "${REPORT_DIR}/" || echo "Report directory not found"
+
+    - name: Publish scan report to workflow summary
+      run: |
+        {
+          echo "## Trivy Scan Report for \`${{ env.IMAGE_NAME }}\`"
+          echo ""
+          echo "- **Scan target**: \`${{ steps.locate.outputs.archive_name }}\`"
+          echo "- **Archive source**: \`${{ steps.locate.outputs.archive_path }}\`"
+          echo "- **Version**: \`${{ env.VERSION }}\`"
+          echo "- **Correlation ID**: \`${{ inputs.correlation_id }}\`"
+          echo ""
+
+          # Check if summary file exists and has content
+          if [ -f "${REPORT_DIR}/summary.md" ] && [ -s "${REPORT_DIR}/summary.md" ]; then
+            echo "### Scan Results"
+            cat "${REPORT_DIR}/summary.md"
+          else
+            echo "### ⚠️ Scan Results"
+            echo ""
+            echo "**Status:** Summary file not generated or empty"
+            echo ""
+            echo "**Possible causes:**"
+            echo "- Trivy template processing failed"
+            echo "- Archive file format issue"
+            echo "- Trivy action configuration problem"
+            echo ""
+            echo "Check the debug steps above for more details."
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    # Generate SARIF report for GitHub Security
+    - name: Generate security report (SARIF)
+      uses: aquasecurity/trivy-action@master
+      if: always()
+      with:
+        scan-type: image
+        input: ./${{ steps.locate.outputs.archive_name }}
+        format: sarif
+        output: ${{ env.REPORT_DIR }}/trivy-results.sarif
+        severity: CRITICAL,HIGH,MEDIUM
+        ignore-unfixed: true
+        vuln-type: os,library
+        exit-code: '0'
+        hide-progress: true
+        cache: true
+      env:
+        TRIVY_SKIP_DB_UPDATE: true
+        TRIVY_SKIP_JAVA_DB_UPDATE: true
+
+    - name: Archive scan reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: trivy-reports-${{ env.IMAGE_NAME }}-${{ env.VERSION }}-variant-${{ matrix.index }}
+        path: ${{ env.REPORT_DIR }}/
+        retention-days: 30

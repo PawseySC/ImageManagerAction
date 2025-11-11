@@ -1,0 +1,444 @@
+name: Reusable — BUILD
+
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        required: true
+        type: string
+      branch_path:
+        required: true
+        type: string
+      dockerfile_path:
+        required: true
+        type: string
+      main:
+        required: true
+        type: string
+      feature:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      platform:
+        required: true
+        type: string
+      correlation_id:
+        required: true
+        type: string
+      has_template:
+        required: true
+        type: string
+      build_matrix:
+        required: true
+        type: string
+    secrets:
+      ACACIA_ACCESS_KEY_ID:
+        required: true
+      ACACIA_SECRET_ACCESS_KEY:
+        required: true
+    outputs:
+      image_tag:
+        description: "Built image tag"
+        value: ${{ jobs.build.outputs.image_tag }}
+      image_name:
+        description: "Built image name"
+        value: ${{ jobs.build.outputs.image_name }}
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner_label }}
+    strategy:
+      matrix: ${{ fromJson(inputs.build_matrix) }}
+      fail-fast: false
+    outputs:
+      image_tag: ${{ steps.build_container.outputs.image_tag }}
+      image_name: ${{ steps.build_container.outputs.image_name }}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Compute variant suffix and display build info
+        id: compute_variant
+        run: |
+          set -euo pipefail
+
+          # Get template values from matrix
+          template_values='${{ toJson(matrix.values) }}'
+          variant_index="${{ matrix.index }}"
+
+          # Compute variant name and suffix from template values
+          if [ "${{ inputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+            # Generate variant name from template values (lowercase for container compatibility)
+            variant_name=$(echo "$template_values" | jq -r 'to_entries | map(.key + "-" + .value) | join("-")' | tr '[:upper:]' '[:lower:]')
+            variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")' | tr '[:upper:]' '[:lower:]')
+          else
+            variant_name="default"
+            variant_suffix=""
+          fi
+
+          echo "=========================================="
+          echo "Build Environment"
+          echo "=========================================="
+          echo "Hostname: $(hostname)"
+          echo "Building: ${{ inputs.main }}/${{ inputs.feature }}:${{ inputs.version }}${variant_suffix}"
+          echo "Platform: ${{ inputs.platform }}"
+          echo "Correlation ID: ${{ inputs.correlation_id }}"
+          echo "Variant #${variant_index}: $variant_name"
+          echo "=========================================="
+
+          # Export for use in subsequent steps
+          echo "VARIANT_SUFFIX=$variant_suffix" >> $GITHUB_ENV
+          echo "VARIANT_NAME=$variant_name" >> $GITHUB_ENV
+
+      - name: Apply template values to Dockerfile
+        if: inputs.has_template == 'true'
+        run: |
+          set -euo pipefail
+
+          dockerfile="${{ inputs.dockerfile_path }}"
+          template_values='${{ toJson(matrix.values) }}'
+
+          echo "Processing Dockerfile: $dockerfile"
+          echo "Template values: $template_values"
+
+          # Create a backup of original Dockerfile
+          cp "$dockerfile" "$dockerfile.original"
+
+          # Parse template values and modify ARG lines in Dockerfile
+          echo "$template_values" | jq -r 'to_entries[] | "\(.key)=\(.value)"' | while IFS='=' read -r arg_name arg_value; do
+            echo "Replacing ARG $arg_name with value: $arg_value"
+
+            # Use sed to replace ARG lines
+            # Pattern: ARG <name>=<any_value> -> ARG <name>=<new_value>
+            sed -i "s|^ARG ${arg_name}=.*|ARG ${arg_name}=${arg_value}|g" "$dockerfile"
+          done
+
+          echo "✓ Dockerfile modifications completed"
+          echo ""
+          echo "=== Modified ARG lines ==="
+          grep "^ARG" "$dockerfile" || echo "No ARG lines found"
+          echo "=========================="
+
+      - name: Configure podman environment
+        id: setup_env
+        run: |
+          echo "Setting up container environment variables..."
+
+          # Export environment variables
+          export XDG_DATA_HOME=/container/${USER}/data
+          export XDG_RUNTIME_DIR=/container/${USER}/runtime
+          export TMPDIR=/container/${USER}/tmp/
+
+          # Create required directories
+          mkdir -p ${XDG_DATA_HOME}
+          mkdir -p ${XDG_RUNTIME_DIR}
+          mkdir -p ${TMPDIR}
+
+          # Set up build optimization variables based on system capabilities
+          # JOBS: Number of parallel build stages (optimized for 60+ core system)
+          # IMAGE_CACHE_REF: Cache reference for registry-based caching (using existing cache structure)
+
+          # Simple JOBS setting based on CPU cores
+          CPU_CORES=$(nproc)
+          echo "Detected CPU cores: $CPU_CORES"
+
+          # Simple 2-tier configuration
+          if [ "$CPU_CORES" -gt 8 ]; then
+            JOBS="32"  # High-core systems
+          else
+            JOBS="4"   # Standard systems (8 cores and below)
+          fi
+
+          echo "JOBS setting: $JOBS (based on $CPU_CORES cores)"
+          IMAGE_CACHE_REF="${IMAGE_CACHE_REF:-}"  # Will be configured based on image tag and cache directory
+
+          # Verify directories and output status
+          echo "Environment setup completed:"
+          echo "USER: ${USER}"
+          echo "XDG_DATA_HOME: ${XDG_DATA_HOME}"
+          echo "XDG_RUNTIME_DIR: ${XDG_RUNTIME_DIR}"
+          echo "TMPDIR: ${TMPDIR}"
+          echo "CPU_CORES: $CPU_CORES"
+          echo "JOBS: $JOBS (simplified 2-tier setting)"
+          echo "IMAGE_CACHE_REF: ${IMAGE_CACHE_REF:-'auto-configure'}"
+
+          # Check if directories exist
+          for dir in "${XDG_DATA_HOME}" "${XDG_RUNTIME_DIR}" "${TMPDIR}"; do
+            if [ -d "$dir" ]; then
+              echo "✓ Podman Directory exists: $dir"
+            else
+              echo "✗ Podman Directory missing: $dir"
+              exit 1
+            fi
+          done
+
+          # Set environment variables for subsequent steps
+          echo "XDG_DATA_HOME=${XDG_DATA_HOME}" >> $GITHUB_ENV
+          echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> $GITHUB_ENV
+          echo "TMPDIR=${TMPDIR}" >> $GITHUB_ENV
+          echo "JOBS=${JOBS}" >> $GITHUB_ENV
+          echo "IMAGE_CACHE_REF=${IMAGE_CACHE_REF}" >> $GITHUB_ENV
+
+      - name: Initialize build cache
+        id: setup_cache
+        run: |
+          # Setup podman cache directory
+          CACHE_DIR="/container/${USER}/podman-cache"
+          mkdir -p "$CACHE_DIR"
+
+          # Create cache subdirectories for different cache types
+          REGISTRY_CACHE_DIR="$CACHE_DIR/registry"
+          BUILD_CACHE_DIR="$CACHE_DIR/build"
+          mkdir -p "$REGISTRY_CACHE_DIR" "$BUILD_CACHE_DIR"
+
+          echo "[CACHE SETUP]:"
+          echo "  Main cache directory: $CACHE_DIR"
+          echo "  Registry cache directory: $REGISTRY_CACHE_DIR"
+          echo "  Build cache directory: $BUILD_CACHE_DIR"
+
+          # Configure podman to use cache
+          export TMPDIR="${TMPDIR:-/tmp}"
+
+          # Check cache sizes if exist
+          if [ -d "$CACHE_DIR" ]; then
+            cache_size=$(du -sh "$CACHE_DIR" 2>/dev/null | cut -f1 || echo "0")
+            echo "  Current total cache size: $cache_size"
+
+            if [ -d "$REGISTRY_CACHE_DIR" ]; then
+              reg_cache_size=$(du -sh "$REGISTRY_CACHE_DIR" 2>/dev/null | cut -f1 || echo "0")
+              echo "  Registry cache size: $reg_cache_size"
+            fi
+          else
+            echo "  Cache directories created (empty)"
+          fi
+
+          # Set environment variables for cache directories
+          echo "CACHE_DIR=$CACHE_DIR" >> $GITHUB_ENV
+          echo "REGISTRY_CACHE_DIR=$REGISTRY_CACHE_DIR" >> $GITHUB_ENV
+          echo "BUILD_CACHE_DIR=$BUILD_CACHE_DIR" >> $GITHUB_ENV
+
+      - name: Build container image
+        id: build_container
+        run: |
+          # Get variables from inputs
+          branch_path="${{ inputs.branch_path }}"
+          dockerfile_path="${{ inputs.dockerfile_path }}"
+          main="${{ inputs.main }}"
+          feature="${{ inputs.feature }}"
+          version="${{ inputs.version }}"
+
+          # Function to sanitize Docker tag/name to comply with Docker naming rules
+          # Docker allows: lowercase letters, digits, hyphens, underscores, and periods
+          # Reference: https://docs.docker.com/engine/reference/commandline/tag/
+          sanitize_docker_name() {
+            local input="$1"
+            # Convert to lowercase
+            local sanitized=$(echo "$input" | tr '[:upper:]' '[:lower:]')
+            # Replace spaces and invalid characters with hyphens
+            sanitized=$(echo "$sanitized" | sed 's/[^a-z0-9._-]/-/g')
+            # Remove consecutive hyphens
+            sanitized=$(echo "$sanitized" | sed 's/-\+/-/g')
+            # Remove leading/trailing hyphens or dots
+            sanitized=$(echo "$sanitized" | sed 's/^[.-]*//;s/[.-]*$//')
+            echo "$sanitized"
+          }
+
+          # Create image name from main and feature and variant suffix, then sanitize it
+          # VARIANT_SUFFIX is set by compute_variant step (e.g., "-python-3.9" or "")
+          image_name_raw="${main}-${feature}${VARIANT_SUFFIX}"
+          image_name=$(sanitize_docker_name "$image_name_raw")
+          image_tag="${image_name}:${version}"
+
+          echo "Original image name: $image_name_raw"
+          echo "Sanitized image name: $image_name"
+          echo "Variant suffix: ${VARIANT_SUFFIX}"
+          echo "Final image tag: $image_tag"
+
+          # Set up cache tracking (Podman uses native layer caching)
+          IMAGE_CACHE_REF="${main}-${feature}:cache"
+
+          # Check if we have previous builds for this main/feature combination
+          if [ -d "${REGISTRY_CACHE_DIR}/${main}-${feature}" ]; then
+            echo "✓ Found existing build cache directory for ${main}-${feature}"
+            echo "✓ Podman will reuse layers from previous builds automatically"
+          else
+            echo "ℹ️ First build for ${main}-${feature}, creating cache tracking"
+          fi
+
+          echo "Building container with podman (optimized)..."
+          echo "Build context: $branch_path"
+          echo "Dockerfile: $dockerfile_path"
+          echo "Image tag: $image_tag"
+          echo "Cache reference: $IMAGE_CACHE_REF"
+
+          # Advanced build with layer caching and parallel jobs support
+          # Note: Podman uses different caching mechanism than Docker BuildKit
+          podman build \
+            --format=docker \
+            --layers \
+            --pull=newer \
+            ${JOBS:+--jobs "$JOBS"} \
+            -f "$dockerfile_path" \
+            -t "$image_tag" \
+            "$branch_path"
+
+          # Verify the image was built
+          if podman images | grep -q "${image_name}"; then
+            echo "✓ Image built successfully: $image_tag"
+
+            # Show advanced optimization information
+            echo "[LAYER CACHE]: Podman native layer caching enabled"
+            echo "[PULL STRATEGY]: newer (only pull if newer than cached)"
+            echo "[PARALLEL JOBS]: $JOBS concurrent build stages ($(nproc) cores detected)"
+            echo "[CACHE DIRECTORY]: Using existing cache structure at ${CACHE_DIR}"
+            echo "[OPTIMIZATION]: Multi-stage builds and layer reuse enabled"
+            echo "[FORMAT]: Docker-compatible image format"
+
+            # Create cache tracking for next builds
+            mkdir -p "${REGISTRY_CACHE_DIR}/${main}-${feature}"
+            echo "$(date): Built ${image_tag} with cache ref ${IMAGE_CACHE_REF}" >> "${REGISTRY_CACHE_DIR}/${main}-${feature}/build.log"
+
+            # Show all images to see layer reuse
+            echo "[ALL IMAGES]:"
+            podman images | head -10
+          else
+            echo "✗ Failed to build image: $image_tag"
+            exit 1
+          fi
+
+          # Set outputs for next step
+          echo "image_tag=$image_tag" >> $GITHUB_OUTPUT
+          echo "image_name=$image_name" >> $GITHUB_OUTPUT
+
+      - name: Export image to archive
+        id: save_container
+        run: |
+          # Get variables from previous step
+          image_tag="${{ steps.build_container.outputs.image_tag }}"
+          image_name="${{ steps.build_container.outputs.image_name }}"
+          version="${{ inputs.version }}"
+
+          # Define output file: name-variant_version.tar
+          # image_name already includes variant suffix
+          output_file="${image_name}_${version}.tar"
+
+          echo "Saving container to Docker archive..."
+          echo "Image: $image_tag"
+          echo "Output: $output_file"
+
+          # Save with podman using Docker archive format (compatible with Trivy)
+          podman save --format docker-archive "$image_tag" -o "$output_file"
+
+          # Verify the file was created
+          if [ -f "$output_file" ]; then
+            file_size=$(ls -lh "$output_file" | awk '{print $5}')
+            echo "✓ Archive saved successfully: $output_file (Size: $file_size)"
+          else
+            echo "✗ Failed to save archive: $output_file"
+            exit 1
+          fi
+
+          # Set outputs
+          echo "archive_file=$output_file" >> $GITHUB_OUTPUT
+          echo "archive_path=${PWD}/$output_file" >> $GITHUB_OUTPUT
+
+      - name: Upload archive to S3 storage
+        id: s3_upload
+        uses: ./.github/actions/setup-rclone
+        with:
+          access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+          secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+          endpoint: https://projects.pawsey.org.au
+          bucket: ${{ vars.ACACIA_BUCKETNAME }}
+          destination_path: ""  # Not used in upload mode
+          upload_mode: 'true'
+          upload_file: ${{ steps.save_container.outputs.archive_file }}
+          upload_file_type: 'archive'
+
+      - name: Load Singularity module and generate SIF file
+        id: build_sif
+        run: |
+          # Get variables
+          archive_file="${{ steps.save_container.outputs.archive_file }}"
+          image_name="${{ steps.build_container.outputs.image_name }}"
+          version="${{ inputs.version }}"
+
+          # Define SIF output file: name-variant_version.sif
+          # image_name already includes variant suffix
+          sif_file="${image_name}_${version}.sif"
+
+          echo "Loading Singularity module and generating SIF file..."
+          echo "Source: docker-archive://$archive_file"
+          echo "Output: $sif_file"
+
+          # Ensure Singularity is available (multi-environment support)
+          echo "Ensuring Singularity is available..."
+
+          if command -v singularity >/dev/null 2>&1; then
+            echo "✓ Singularity already available in PATH"
+            singularity --version
+          elif module load singularity/4.1.0 2>/dev/null && command -v singularity >/dev/null 2>&1; then
+            echo "✓ Singularity loaded via Setonix module system"
+            singularity --version
+          else
+            echo "✗ Singularity not available"
+            echo "Tried:"
+            echo "  1. Direct PATH lookup (Ella/ARM)"
+            echo "  2. module load singularity/4.1.0 (Setonix)"
+            exit 1
+          fi
+
+          # Build SIF file from Docker archive using Singularity
+          echo "Building SIF file from Docker archive..."
+          CORES=$(nproc)
+          echo "Detected $CORES CPU cores for optimization"
+
+          # Set environment variables for mksquashfs optimization
+          export MKSQUASHFS_PROCESSORS=$CORES
+          export MKSQUASHFS_MEM="80%"
+          export MKSQUASHFS_COMP="zstd"
+          export MKSQUASHFS_COMP_OPTS="-Xcompression-level 3"
+
+          echo "Setting mksquashfs optimization via environment variables"
+
+          # Singularity build with environment-based optimization
+          if singularity build \
+            --force \
+            "$sif_file" "docker-archive://$archive_file"; then
+            if [ -f "$sif_file" ]; then
+              file_size=$(ls -lh "$sif_file" | awk '{print $5}')
+              echo "✓ SIF file generated successfully: $sif_file (Size: $file_size)"
+              echo "[SINGULARITY OPTIMIZATION]:"
+              echo "  - Processors: $CORES cores"
+              echo "  - Memory: 80% allocation"
+              echo "  - Compression: zstd level 3"
+              echo "  - Method: Environment variables"
+            else
+              echo "✗ SIF file generation failed - file not found"
+              exit 1
+            fi
+          else
+            echo "✗ Failed to generate SIF file"
+            exit 1
+          fi
+
+          # Set outputs
+          echo "sif_file=$sif_file" >> $GITHUB_OUTPUT
+          echo "sif_path=${PWD}/$sif_file" >> $GITHUB_OUTPUT
+
+      - name: Upload SIF file to S3 storage
+        id: s3_sif_upload
+        uses: ./.github/actions/setup-rclone
+        with:
+          access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+          secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+          endpoint: https://projects.pawsey.org.au
+          bucket: ${{ vars.ACACIA_SIF_BUCKETNAME }}
+          destination_path: ""  # Not used in upload mode
+          upload_mode: 'true'
+          upload_file: ${{ steps.build_sif.outputs.sif_file }}
+          upload_file_type: 'sif'

@@ -1,0 +1,135 @@
+name: Image Manager CI/CD Dispatcher
+# Version 2.1.0 - Modularized with reusable workflows
+# This workflow dispatches to reusable workflow files for easier debugging
+# Triggered by pushes to cicd-* branches with manifest.json configuration
+# Supports branch formats: cicd-main/feature (preferred) or cicd-main-feature (legacy)
+
+on:
+  push:
+    branches:
+      - 'cicd-*'
+      - 'cicd-*/**'
+      - 'cicd-**'
+
+permissions:
+  contents: read
+  security-events: write  # Required for uploading SARIF results to GitHub Security tab
+  actions: read           # Required for accessing workflow run information
+
+jobs:
+  PREPARE:
+    uses: ./.github/workflows/reusable-prepare.yml
+    secrets: inherit
+
+  BUILD:
+    needs: PREPARE
+    if: needs.PREPARE.outputs.proceed_valid == 'true'
+    uses: ./.github/workflows/reusable-build.yml
+    with:
+      runner_label: ${{ needs.PREPARE.outputs.runner_label }}
+      branch_path: ${{ needs.PREPARE.outputs.branch_path }}
+      dockerfile_path: ${{ needs.PREPARE.outputs.dockerfile_path }}
+      main: ${{ needs.PREPARE.outputs.main }}
+      feature: ${{ needs.PREPARE.outputs.feature }}
+      version: ${{ needs.PREPARE.outputs.version }}
+      platform: ${{ needs.PREPARE.outputs.platform }}
+      correlation_id: ${{ needs.PREPARE.outputs.correlation_id }}
+      has_template: ${{ needs.PREPARE.outputs.has_template }}
+      build_matrix: ${{ needs.PREPARE.outputs.build_matrix }}
+    secrets: inherit
+
+  SCAN:
+    needs: [PREPARE, BUILD]
+    if: needs.PREPARE.outputs.proceed_valid == 'true' && needs.PREPARE.outputs.noscan != 'true'
+    uses: ./.github/workflows/reusable-scan.yml
+    with:
+      runner_label: ${{ needs.PREPARE.outputs.runner_label }}
+      main: ${{ needs.PREPARE.outputs.main }}
+      feature: ${{ needs.PREPARE.outputs.feature }}
+      version: ${{ needs.PREPARE.outputs.version }}
+      has_template: ${{ needs.PREPARE.outputs.has_template }}
+      build_matrix: ${{ needs.PREPARE.outputs.build_matrix }}
+      correlation_id: ${{ needs.PREPARE.outputs.correlation_id }}
+    secrets: inherit
+
+  PUSH_PRIV:
+    needs: [PREPARE, BUILD]
+    if: needs.PREPARE.outputs.proceed_valid == 'true'
+    uses: ./.github/workflows/reusable-push-priv.yml
+    with:
+      runner_label: ${{ needs.PREPARE.outputs.runner_label }}
+      main: ${{ needs.PREPARE.outputs.main }}
+      feature: ${{ needs.PREPARE.outputs.feature }}
+      version: ${{ needs.PREPARE.outputs.version }}
+      has_template: ${{ needs.PREPARE.outputs.has_template }}
+      build_matrix: ${{ needs.PREPARE.outputs.build_matrix }}
+      private_targets: ${{ needs.PREPARE.outputs.private_targets }}
+      setonixreg_available: ${{ needs.PREPARE.outputs.setonixreg_available }}
+    secrets: inherit
+
+  PUSH_PUBLIC:
+    needs: [PREPARE, BUILD, PUSH_PRIV]
+    if: needs.PREPARE.outputs.proceed_valid == 'true'
+    uses: ./.github/workflows/reusable-push-public.yml
+    with:
+      runner_label: ${{ needs.PREPARE.outputs.runner_label }}
+      main: ${{ needs.PREPARE.outputs.main }}
+      feature: ${{ needs.PREPARE.outputs.feature }}
+      version: ${{ needs.PREPARE.outputs.version }}
+      has_template: ${{ needs.PREPARE.outputs.has_template }}
+      build_matrix: ${{ needs.PREPARE.outputs.build_matrix }}
+      targets: ${{ needs.PREPARE.outputs.targets }}
+      devmode: ${{ needs.PREPARE.outputs.devmode }}
+      quayio_available: ${{ needs.PREPARE.outputs.quayio_available }}
+      setonixreg_available: ${{ needs.PREPARE.outputs.setonixreg_available }}
+    secrets: inherit
+
+  DEPLOY:
+    needs: [PREPARE, BUILD, PUSH_PUBLIC]
+    if: |
+      needs.PREPARE.outputs.proceed_valid == 'true' &&
+      needs.PREPARE.outputs.shpc == 'true' &&
+      needs.PREPARE.outputs.platform == 'x86' &&
+      needs.PREPARE.outputs.quayio_available == 'true' &&
+      contains(needs.PREPARE.outputs.targets, 'quay.io')
+    uses: ./.github/workflows/reusable-deploy.yml
+    with:
+      runner_label: ${{ needs.PREPARE.outputs.runner_label }}
+      version: ${{ needs.PREPARE.outputs.version }}
+      main: ${{ needs.PREPARE.outputs.main }}
+      feature: ${{ needs.PREPARE.outputs.feature }}
+      platform: ${{ needs.PREPARE.outputs.platform }}
+      correlation_id: ${{ needs.PREPARE.outputs.correlation_id }}
+      has_template: ${{ needs.PREPARE.outputs.has_template }}
+      build_matrix: ${{ needs.PREPARE.outputs.build_matrix }}
+      targets: ${{ needs.PREPARE.outputs.targets }}
+      quayio_available: ${{ needs.PREPARE.outputs.quayio_available }}
+    secrets: inherit
+
+  SUMMARY:
+    needs: [PREPARE, BUILD, SCAN, PUSH_PRIV, PUSH_PUBLIC, DEPLOY]
+    if: always() && needs.PREPARE.outputs.proceed_valid == 'true'
+    uses: ./.github/workflows/reusable-summary.yml
+    with:
+      main: ${{ needs.PREPARE.outputs.main }}
+      feature: ${{ needs.PREPARE.outputs.feature }}
+      version: ${{ needs.PREPARE.outputs.version }}
+      platform: ${{ needs.PREPARE.outputs.platform }}
+      correlation_id: ${{ needs.PREPARE.outputs.correlation_id }}
+      has_template: ${{ needs.PREPARE.outputs.has_template }}
+      variant_count: ${{ needs.PREPARE.outputs.variant_count }}
+      build_matrix: ${{ needs.PREPARE.outputs.build_matrix }}
+      image_name: ${{ needs.BUILD.outputs.image_name }}
+      result_prepare: ${{ needs.PREPARE.result }}
+      result_build: ${{ needs.BUILD.result }}
+      result_scan: ${{ needs.SCAN.result }}
+      result_push_priv: ${{ needs.PUSH_PRIV.result }}
+      result_push_public: ${{ needs.PUSH_PUBLIC.result }}
+      result_deploy: ${{ needs.DEPLOY.result }}
+      targets: ${{ needs.PREPARE.outputs.targets }}
+      private_targets: ${{ needs.PREPARE.outputs.private_targets }}
+      quayio_available: ${{ needs.PREPARE.outputs.quayio_available }}
+      setonixreg_available: ${{ needs.PREPARE.outputs.setonixreg_available }}
+      acacia_bucket: ${{ vars.ACACIA_BUCKETNAME }}
+      acacia_sif_bucket: ${{ vars.ACACIA_SIF_BUCKETNAME }}
+    secrets: inherit

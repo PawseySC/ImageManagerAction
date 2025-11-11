@@ -1,0 +1,299 @@
+name: Reusable — PUSH PUBLIC
+
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        required: true
+        type: string
+      main:
+        required: true
+        type: string
+      feature:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      has_template:
+        required: true
+        type: string
+      build_matrix:
+        required: true
+        type: string
+      targets:
+        required: true
+        type: string
+      devmode:
+        required: true
+        type: string
+      quayio_available:
+        required: true
+        type: string
+      setonixreg_available:
+        required: true
+        type: string
+    secrets:
+      ACACIA_ACCESS_KEY_ID:
+        required: true
+      ACACIA_SECRET_ACCESS_KEY:
+        required: true
+      QUAYIO_TOKEN:
+        required: false
+      SETONIXREG_PASS:
+        required: false
+
+jobs:
+  push_public:
+    runs-on: ${{ inputs.runner_label }}
+    strategy:
+      matrix: ${{ fromJson(inputs.build_matrix) }}
+      fail-fast: false
+    # Environment selection based on devmode flag and targets:
+    # - If devmode=true OR targets is empty: Use 'devmode_skip_approval' environment (no manual approval required)
+    # - If devmode=false AND targets has values: Use 'manual_approval' environment (requires manual approval)
+    environment:
+      name: ${{ (inputs.devmode == 'true' || inputs.targets == '[]') && 'devmode_skip_approval' || 'manual_approval' }}
+    env:
+      VERSION: ${{ inputs.version }}
+      TARGETS: ${{ inputs.targets }}
+    steps:
+    - name: Compute image name for this variant
+      id: compute_image_name
+      run: |
+        set -euo pipefail
+
+        # Get template values from matrix
+        template_values='${{ toJson(matrix.values) }}'
+        main="${{ inputs.main }}"
+        feature="${{ inputs.feature }}"
+
+        # Compute variant suffix (same logic as BUILD job)
+        if [ "${{ inputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
+          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")' | tr '[:upper:]' '[:lower:]')
+        else
+          variant_suffix=""
+        fi
+
+        # Sanitize image name (same logic as BUILD job)
+        image_name_raw="${main}-${feature}${variant_suffix}"
+        image_name=$(echo "$image_name_raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^[.-]*//;s/[.-]*$//')
+
+        echo "IMAGE_NAME=$image_name" >> $GITHUB_ENV
+        echo "Computed image name: $image_name"
+
+    - name: Display public registry push plan
+      run: |
+        echo "Hostname: $(hostname)"
+        echo "Image: ${IMAGE_NAME}:${VERSION}"
+        echo "Variant #${{ matrix.index }}"
+        echo "Configured Targets: $TARGETS"
+        echo ""
+        echo "=== Public Registry Push Plan ==="
+        echo "Registry credentials were checked in PREPARE-job:"
+        echo ""
+
+        # Parse targets from manifest
+        targets_array=$(echo '${{ inputs.targets }}' | jq -r '.[]')
+
+        # Check each target from manifest against available credentials
+        echo "$targets_array" | while read -r target; do
+          case "$target" in
+            "quay.io")
+              if [ "${{ inputs.quayio_available }}" = "true" ]; then
+                echo "[✓] Quay.io: Will push to quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
+              else
+                echo "[skip] Quay.io: Requested in manifest but credentials not available"
+              fi
+              ;;
+            "setonix-registry")
+              if [ "${{ inputs.setonixreg_available }}" = "true" ]; then
+                echo "[✓] Setonix Public Registry: Will push to setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}"
+              else
+                echo "[skip] Setonix Registry: Requested in manifest but credentials not available"
+              fi
+              ;;
+            *)
+              echo "[skip] Unknown target: $target"
+              ;;
+          esac
+        done
+        echo ""
+
+    - name: Configure podman environment
+      if: inputs.quayio_available == 'true' || inputs.setonixreg_available == 'true'
+      run: |
+        echo "Setting up container environment variables for public push..."
+
+        # Export environment variables (same as BUILD-job)
+        export XDG_DATA_HOME=/container/${USER}/data
+        export XDG_RUNTIME_DIR=/container/${USER}/runtime
+        export TMPDIR=/container/${USER}/tmp/
+
+        # Create required directories
+        mkdir -p ${XDG_DATA_HOME}
+        mkdir -p ${XDG_RUNTIME_DIR}
+        mkdir -p ${TMPDIR}
+
+        echo "Public push environment setup completed:"
+        echo "XDG_DATA_HOME: ${XDG_DATA_HOME}"
+        echo "XDG_RUNTIME_DIR: ${XDG_RUNTIME_DIR}"
+        echo "TMPDIR: ${TMPDIR}"
+
+        # Set environment variables for subsequent steps
+        echo "XDG_DATA_HOME=${XDG_DATA_HOME}" >> $GITHUB_ENV
+        echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> $GITHUB_ENV
+        echo "TMPDIR=${TMPDIR}" >> $GITHUB_ENV
+
+    - name: Download archive and load to podman
+      id: locate_and_load
+      if: inputs.quayio_available == 'true' || inputs.setonixreg_available == 'true'
+      uses: ./.github/actions/setup-rclone
+      with:
+        access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+        secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+        endpoint: https://projects.pawsey.org.au
+        bucket: ${{ vars.ACACIA_BUCKETNAME }}
+        destination_path: ${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar
+        download_mode: true
+        dockerfile_name: ${{ env.IMAGE_NAME }}
+        version: ${{ env.VERSION }}
+        load_to_podman: true
+
+    - name: Initialize Docker configuration
+      if: inputs.quayio_available == 'true' || inputs.setonixreg_available == 'true'
+      run: |
+        mkdir -p ~/.docker
+        echo "Created Docker config directory: ~/.docker"
+
+
+    # ============================================
+    # Quay.io Push (Only if in targets)
+    # ============================================
+    - name: Push to Quay.io public registry
+      if: inputs.quayio_available == 'true' && contains(inputs.targets, 'quay.io')
+      continue-on-error: true
+      run: |
+        set +e  # Don't exit on errors to allow independent execution
+        echo "=========================================="
+        echo " Quay.io Push Process"
+        echo "=========================================="
+
+        # Login to Quay.io
+        echo "🔐 Logging into Quay.io..."
+        if podman login quay.io -u "${{ vars.QUAYIO_USERNAME }}" -p "${{ secrets.QUAYIO_TOKEN }}"; then
+          echo "✓ Quay.io login successful"
+        else
+          echo "✗ Quay.io login failed"
+          exit 1
+        fi
+
+        # Tag and push (IMAGE_NAME already includes variant suffix from BUILD-job)
+        image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
+        quayio_tag="quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
+
+        echo ""
+        echo "🏷️  Tagging image for Quay.io:"
+        echo "   Source: $image_tag"
+        echo "   Target: $quayio_tag"
+
+        if podman tag "$image_tag" "$quayio_tag"; then
+          echo "✓ Image tagged successfully"
+        else
+          echo "✗ Image tagging failed"
+          exit 1
+        fi
+
+        echo ""
+        echo "📤 Pushing to Quay.io..."
+        if podman push "$quayio_tag"; then
+          echo "✅ Successfully pushed to Quay.io: $quayio_tag"
+
+          # Ensure repository is set to public for SHPC deployment
+          echo "Setting repository visibility to public..."
+          visibility_response=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.QUAYIO_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"visibility": "public"}' \
+            "https://quay.io/api/v1/repository/pawsey/${IMAGE_NAME}/changevisibility")
+
+          if echo "$visibility_response" | jq -e '.success' > /dev/null 2>&1; then
+            echo "✓ Repository visibility set to public"
+          else
+            echo "ℹ️  Repository visibility API call completed (status unknown)"
+          fi
+        else
+          echo "❌ Failed to push to Quay.io"
+          exit 1
+        fi
+
+    # ============================================
+    # Setonix Public Registry Push (Only if in targets)
+    # ============================================
+    - name: Push to Setonix public registry
+      if: inputs.setonixreg_available == 'true' && contains(inputs.targets, 'setonix-registry')
+      continue-on-error: true
+      run: |
+        set +e  # Don't exit on errors to allow independent execution
+        echo "=========================================="
+        echo " Setonix Public Registry Push Process"
+        echo "=========================================="
+
+        # Login to Setonix Registry
+        echo "🔐 Logging into Setonix Registry..."
+        if podman login https://setonix-registry.pawsey.org.au -u "${{ vars.SETONIXREG_USERNAME }}" -p "${{ secrets.SETONIXREG_PASS }}"; then
+          echo "✓ Setonix Registry login successful"
+        else
+          echo "✗ Setonix Registry login failed"
+          exit 1
+        fi
+
+        # Tag and push to public channel (IMAGE_NAME already includes variant suffix from BUILD-job)
+        image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
+        setonix_public_tag="setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}"
+
+        echo ""
+        echo "🏷️  Tagging image for Setonix Public Registry:"
+        echo "   Source: $image_tag"
+        echo "   Target: $setonix_public_tag"
+
+        if podman tag "$image_tag" "$setonix_public_tag"; then
+          echo "✓ Image tagged successfully"
+        else
+          echo "✗ Image tagging failed"
+          exit 1
+        fi
+
+        echo ""
+        echo "📤 Pushing to Setonix Public Registry..."
+        if podman push "$setonix_public_tag"; then
+          echo "✅ Successfully pushed to Setonix Public Registry: $setonix_public_tag"
+        else
+          echo "❌ Failed to push to Setonix Public Registry"
+          exit 1
+        fi
+
+    - name: Clean up podman images
+      if: always() && (inputs.quayio_available == 'true' || inputs.setonixreg_available == 'true')
+      run: |
+        echo "🧹 Cleaning up local images..."
+        image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
+
+        # Remove original image
+        echo "Removing base image: $image_tag"
+        podman rmi "$image_tag" 2>/dev/null || echo "  (Base image already removed or not found)"
+
+        # Remove tagged images based on targets (IMAGE_NAME already includes variant suffix from BUILD-job)
+        if [ "${{ inputs.quayio_available }}" = "true" ] && echo '${{ inputs.targets }}' | jq -e 'contains(["quay.io"])' > /dev/null; then
+          quayio_tag="quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
+          echo "Removing Quay.io tag: $quayio_tag"
+          podman rmi "$quayio_tag" 2>/dev/null || echo "  (Quay.io tag already removed or not found)"
+        fi
+
+        if [ "${{ inputs.setonixreg_available }}" = "true" ] && echo '${{ inputs.targets }}' | jq -e 'contains(["setonix-registry"])' > /dev/null; then
+          setonix_public_tag="setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}"
+          echo "Removing Setonix Public tag: $setonix_public_tag"
+          podman rmi "$setonix_public_tag" 2>/dev/null || echo "  (Setonix Public tag already removed or not found)"
+        fi
+
+        echo "✅ Local image cleanup completed"
