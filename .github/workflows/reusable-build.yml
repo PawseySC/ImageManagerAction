@@ -375,17 +375,22 @@ jobs:
           echo "Source: docker-archive://$archive_file"
           echo "Output: $sif_file"
 
-          # Load Singularity module
-          echo "Loading Singularity module..."
-          if module load singularity/4.1.0; then
-            echo "✓ Singularity module loaded successfully"
+          # Ensure Singularity is available (multi-environment support)
+          echo "Ensuring Singularity is available..."
+
+          if command -v singularity >/dev/null 2>&1; then
+            echo "✓ Singularity already available in PATH"
+            singularity --version
+          elif module load singularity/4.1.0 2>/dev/null && command -v singularity >/dev/null 2>&1; then
+            echo "✓ Singularity loaded via Setonix module system"
+            singularity --version
           else
-            echo "✗ Failed to load Singularity module"
+            echo "✗ Singularity not available"
+            echo "Tried:"
+            echo "  1. Direct PATH lookup (Ella/ARM)"
+            echo "  2. module load singularity/4.1.0 (Setonix)"
             exit 1
           fi
-
-          # Verify Singularity is available
-          singularity --version
 
           # Build SIF file from Docker archive using Singularity
           echo "Building SIF file from Docker archive..."
