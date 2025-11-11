@@ -247,13 +247,15 @@ jobs:
             echo "$sanitized"
           }
 
-          # Create image name from main and feature and sanitize it
-          image_name_raw="${main}-${feature}"
+          # Create image name from main and feature and variant suffix, then sanitize it
+          # VARIANT_SUFFIX is set by compute_variant step (e.g., "-python-3.9" or "")
+          image_name_raw="${main}-${feature}${VARIANT_SUFFIX}"
           image_name=$(sanitize_docker_name "$image_name_raw")
           image_tag="${image_name}:${version}"
 
           echo "Original image name: $image_name_raw"
           echo "Sanitized image name: $image_name"
+          echo "Variant suffix: ${VARIANT_SUFFIX}"
           echo "Final image tag: $image_tag"
 
           # Set up cache tracking (Podman uses native layer caching)
