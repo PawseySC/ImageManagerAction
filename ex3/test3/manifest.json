@@ -11,7 +11,7 @@
       "stretch",
       "buster"
     ],
-    "CURL_ENABLED": "yes"
+    "CURL_ENABLED": ["yes", "no"]
   },
   "targets": [
     "quay.io"
