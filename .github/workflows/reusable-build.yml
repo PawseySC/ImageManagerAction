@@ -258,6 +258,15 @@ jobs:
           echo "Image tag: $image_tag"
           echo "Cache reference: $IMAGE_CACHE_REF"
 
+          # Configure Podman to allow short names without prompting
+          # This is needed for non-interactive environments (GitHub Actions)
+          mkdir -p ~/.config/containers/registries.conf.d
+          cat > ~/.config/containers/registries.conf.d/shortnames.conf <<EOF
+          unqualified-search-registries = ["docker.io"]
+          short-name-mode = "permissive"
+          EOF
+          echo "✓ Configured Podman to allow short-name resolution"
+
           # Advanced build with layer caching and parallel jobs support
           # Note: Podman uses different caching mechanism than Docker BuildKit
           podman build \
