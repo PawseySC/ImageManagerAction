@@ -10,6 +10,7 @@
 ARG PENNYLANE_VERSION=master
 ARG PYTHON_VERSION=3.11
 ARG CUDA_VER=12.8.1
+ARG LIGHTNING_VERSION=master
 
 # Create basic runtime environment base on Ubuntu 22.04 (jammy)
 # Create and activate runtime virtual environment
@@ -19,7 +20,7 @@ ARG CUDA_ARCH=HOPPER90
 ARG CUDA_VER
 ARG DEBIAN_FRONTEND=noninteractive
 ARG GCC_VERSION=11
-ARG LIGHTNING_VERSION=master
+ARG LIGHTNING_VERSION
 ARG PENNYLANE_VERSION
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
@@ -175,4 +176,4 @@ COPY --from=build-wheel-lightning-qubit /opt/pennylane-lightning/dist/ /
 RUN pip install --no-cache-dir --force-reinstall pennylane_lightning*.whl
 RUN pip install --no-cache-dir git+https://github.com/PennyLaneAI/pennylane.git@${PENNYLANE_VERSION}
 RUN pip install --no-cache-dir matplotlib jupyterlab
-LABEL org.opencontainers.image.version=0.0.2 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=false org.opencontainers.image.platform=arm
+LABEL org.opencontainers.image.version=0.0.3 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=false org.opencontainers.image.platform=arm

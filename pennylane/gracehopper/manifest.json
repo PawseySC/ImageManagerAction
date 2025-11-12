@@ -1,7 +1,7 @@
 {
   "main": "pennylane",
   "feature": "gracehopper",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "devmode": true,
   "noscan": false,
   "platform": "arm",
@@ -19,16 +19,16 @@
     "path": "pennylane/gracehopper/"
   },
   "metadata": {
-    "timestamp": "2025-11-12T03:47:14.627204Z",
-    "correlation_id": "8def7f1b-d868-47bf-963f-0e38714ecd76"
+    "timestamp": "2025-11-12T03:50:39.173006Z",
+    "correlation_id": "2632b383-afef-432f-9a88-86b1db0e0420"
   },
   "template": {
     "PENNYLANE_VERSION": "master",
     "PYTHON_VERSION": "3.11",
     "CUDA_VER": "12.8.1",
+    "LIGHTNING_VERSION": "master",
     "CUDA_ARCH": "HOPPER90",
     "DEBIAN_FRONTEND": "noninteractive",
-    "GCC_VERSION": "11",
-    "LIGHTNING_VERSION": "master"
+    "GCC_VERSION": "11"
   }
 }
