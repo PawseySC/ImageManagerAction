@@ -112,25 +112,17 @@ jobs:
           **Docker Archives** (`s3://${{ inputs.acacia_bucket }}/`):
           BLOCK_EOF
 
-            # Parse matrix and compute variant_suffix for each variant (lowercase for container compatibility)
+            # Use pre-computed image_name from matrix
             matrix_json='${{ inputs.build_matrix }}'
-            while read variant; do
-              echo "- \`${IMAGE_NAME}${variant}_${VERSION}.tar\`" >> /tmp/archive_block.txt
-            done < <(echo "$matrix_json" | jq -r '.include[] |
-              .values |
-              to_entries |
-              map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-              join("")')
+            while read image_name; do
+              echo "- \`${image_name}_${VERSION}.tar\`" >> /tmp/archive_block.txt
+            done < <(echo "$matrix_json" | jq -r '.include[].image_name')
 
             echo "" >> /tmp/archive_block.txt
             echo "**Singularity SIF Files** (\`s3://${{ inputs.acacia_sif_bucket }}/\`):" >> /tmp/archive_block.txt
-            while read variant; do
-              echo "- \`${IMAGE_NAME}${variant}_${VERSION}.sif\`" >> /tmp/archive_block.txt
-            done < <(echo "$matrix_json" | jq -r '.include[] |
-              .values |
-              to_entries |
-              map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-              join("")')
+            while read image_name; do
+              echo "- \`${image_name}_${VERSION}.sif\`" >> /tmp/archive_block.txt
+            done < <(echo "$matrix_json" | jq -r '.include[].image_name')
           else
             cat > /tmp/archive_block.txt <<EOF
           | Location | Address | Status |
@@ -173,13 +165,9 @@ jobs:
             if [ "${{ inputs.setonixreg_available }}" = "true" ]; then
               echo "### Setonix Private Registry" >> /tmp/registry_block.txt
               echo "" >> /tmp/registry_block.txt
-              while read variant; do
-                echo "- \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}${variant}:${VERSION}\`" >> /tmp/registry_block.txt
-              done < <(echo "$matrix_json" | jq -r '.include[] |
-                .values |
-                to_entries |
-                map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                join("")')
+              while read image_name; do
+                echo "- \`setonix-registry.pawsey.org.au/${private_username}/${image_name}:${VERSION}\`" >> /tmp/registry_block.txt
+              done < <(echo "$matrix_json" | jq -r '.include[].image_name')
               echo "" >> /tmp/registry_block.txt
             fi
 
@@ -187,13 +175,9 @@ jobs:
             if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ inputs.quayio_available }}" = "true" ]; then
               echo "### Quay.io Public Registry" >> /tmp/registry_block.txt
               echo "" >> /tmp/registry_block.txt
-              while read variant; do
-                echo "- \`quay.io/pawsey/${IMAGE_NAME}${variant}:${VERSION}\`" >> /tmp/registry_block.txt
-              done < <(echo "$matrix_json" | jq -r '.include[] |
-                .values |
-                to_entries |
-                map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                join("")')
+              while read image_name; do
+                echo "- \`quay.io/pawsey/${image_name}:${VERSION}\`" >> /tmp/registry_block.txt
+              done < <(echo "$matrix_json" | jq -r '.include[].image_name')
               echo "" >> /tmp/registry_block.txt
             fi
 
@@ -201,13 +185,9 @@ jobs:
             if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1 && [ "${{ inputs.setonixreg_available }}" = "true" ]; then
               echo "### Setonix Public Registry" >> /tmp/registry_block.txt
               echo "" >> /tmp/registry_block.txt
-              while read variant; do
-                echo "- \`setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}${variant}:${VERSION}\`" >> /tmp/registry_block.txt
-              done < <(echo "$matrix_json" | jq -r '.include[] |
-                .values |
-                to_entries |
-                map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                join("")')
+              while read image_name; do
+                echo "- \`setonix-registry.pawsey.org.au/pawsey/${image_name}:${VERSION}\`" >> /tmp/registry_block.txt
+              done < <(echo "$matrix_json" | jq -r '.include[].image_name')
               echo "" >> /tmp/registry_block.txt
             fi
           else
@@ -292,8 +272,7 @@ jobs:
                 echo "module load shpc/0.1.32" >> /tmp/shpc_block.txt
                 echo "" >> /tmp/shpc_block.txt
                 echo "# List available variants" >> /tmp/shpc_block.txt
-                first_variant=$(echo "$matrix_json" | jq -r '.include[0].values | to_entries | map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) | join("")')
-                first_variant_name="${IMAGE_NAME}${first_variant}"
+                first_variant_name=$(echo "$matrix_json" | jq -r '.include[0].image_name')
                 echo "shpc show quay.io/pawsey/${first_variant_name}" >> /tmp/shpc_block.txt
                 echo "" >> /tmp/shpc_block.txt
                 echo "# Install a specific variant (example with first variant)" >> /tmp/shpc_block.txt

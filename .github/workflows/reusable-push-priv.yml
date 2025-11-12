@@ -45,45 +45,16 @@ jobs:
       VERSION: ${{ inputs.version }}
       BUCKET: ${{ vars.ACACIA_BUCKETNAME }}
     steps:
-    - name: Compute image name for this variant
-      id: compute_image_name
+    - name: Set image name for this variant
+      id: set_image_name
       run: |
         set -euo pipefail
 
-        # Get template values from matrix
-        template_values='${{ toJson(matrix.values) }}'
-        main="${{ inputs.main }}"
-        feature="${{ inputs.feature }}"
+        # Use pre-computed IMAGE_NAME from matrix (already sanitized)
+        IMAGE_NAME='${{ matrix.image_name }}'
 
-        # Compute variant suffix - only include keys with multiple values
-        if [ "${{ inputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
-          # Get all variant values from build matrix
-          build_matrix='${{ inputs.build_matrix }}'
-          all_values=$(echo "$build_matrix" | jq -c '[.include[].values]')
-
-          # For each key, check if it varies across all variants
-          variant_suffix=""
-          for key in $(echo "$template_values" | jq -r 'keys[]'); do
-            current_value=$(echo "$template_values" | jq -r --arg k "$key" '.[$k]')
-            unique_count=$(echo "$all_values" | jq --arg k "$key" '[.[].[$k]] | unique | length')
-
-            # Only include if this key has multiple different values
-            if [ "$unique_count" -gt 1 ]; then
-              key_lower=$(echo "$key" | tr '[:upper:]' '[:lower:]')
-              value_lower=$(echo "$current_value" | tr '[:upper:]' '[:lower:]')
-              variant_suffix="${variant_suffix}-${key_lower}-${value_lower}"
-            fi
-          done
-        else
-          variant_suffix=""
-        fi
-
-        # Sanitize image name (same logic as BUILD job)
-        image_name_raw="${main}-${feature}${variant_suffix}"
-        image_name=$(echo "$image_name_raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^[.-]*//;s/[.-]*$//')
-
-        echo "IMAGE_NAME=$image_name" >> $GITHUB_ENV
-        echo "Computed image name: $image_name"
+        echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+        echo "Image name: $IMAGE_NAME"
 
     - name: Display registry environment
       run: |
