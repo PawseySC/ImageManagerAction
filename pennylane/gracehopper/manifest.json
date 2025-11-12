@@ -1,7 +1,7 @@
 {
   "main": "pennylane",
   "feature": "gracehopper",
-  "version": "0.0.4",
+  "version": "0.0.2",
   "devmode": true,
   "noscan": false,
   "platform": "arm",
@@ -19,8 +19,8 @@
     "path": "pennylane/gracehopper/"
   },
   "metadata": {
-    "timestamp": "2025-11-12T03:42:27.693404Z",
-    "correlation_id": "ba3fdee8-97c5-47fb-9e0e-927a910dd50b"
+    "timestamp": "2025-11-12T03:47:14.627204Z",
+    "correlation_id": "8def7f1b-d868-47bf-963f-0e38714ecd76"
   },
   "template": {
     "PENNYLANE_VERSION": "master",

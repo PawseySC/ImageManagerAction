@@ -69,6 +69,8 @@ RUN ccache --set-config=cache_dir=/opt/ccache
 # Create and activate build virtual environment
 # Install Lightning dev requirements
 FROM base-build AS base-build-python
+ARG LIGHTNING_VERSION
+ARG PYTHON_VERSION
 WORKDIR /opt/pennylane-lightning
 ENV VIRTUAL_ENV=/opt/venv-build
 RUN python${PYTHON_VERSION} -m venv $VIRTUAL_ENV
@@ -173,4 +175,4 @@ COPY --from=build-wheel-lightning-qubit /opt/pennylane-lightning/dist/ /
 RUN pip install --no-cache-dir --force-reinstall pennylane_lightning*.whl
 RUN pip install --no-cache-dir git+https://github.com/PennyLaneAI/pennylane.git@${PENNYLANE_VERSION}
 RUN pip install --no-cache-dir matplotlib jupyterlab
-LABEL org.opencontainers.image.version=0.0.4 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=false org.opencontainers.image.platform=arm
+LABEL org.opencontainers.image.version=0.0.2 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=false org.opencontainers.image.platform=arm
