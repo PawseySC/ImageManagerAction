@@ -7,6 +7,12 @@ inputs:
   dockerfile_path:
     description: 'Path to Dockerfile'
     required: true
+  main:
+    description: 'Main category from manifest'
+    required: true
+  feature:
+    description: 'Feature name from manifest'
+    required: true
 outputs:
   matrix:
     description: 'JSON matrix configuration for GitHub Actions'
@@ -51,8 +57,25 @@ runs:
         # Parse template and separate arrays from strings
         # This script will generate all combinations using cartesian product
 
-        # Step 1: Extract all keys and their values
+        # Step 1: Extract all keys and identify varying keys
+        # Varying keys = keys with multiple values (array length > 1)
         keys=$(echo "$template" | jq -r 'keys[]')
+        varying_keys=()
+
+        for key in $keys; do
+          value=$(echo "$template" | jq -c --arg k "$key" '.[$k]')
+
+          # Check if this key has multiple values
+          if echo "$value" | jq -e 'type == "array"' > /dev/null 2>&1; then
+            array_length=$(echo "$value" | jq 'length')
+            if [ "$array_length" -gt 1 ]; then
+              varying_keys+=("$key")
+            fi
+          fi
+          # Single string or single-element array = constant, not varying
+        done
+
+        echo "Varying keys (will be in image name): ${varying_keys[*]}"
 
         # Step 2: Build arrays for cartesian product
         # We'll use a shell approach to generate all combinations
@@ -112,14 +135,53 @@ runs:
         echo "Combinations:"
         echo "$combinations" | jq '.'
 
-        # Step 3: Generate matrix configuration
+        # Step 3: Generate matrix configuration with varying_keys
+        # Convert varying_keys array to JSON
+        if [ ${#varying_keys[@]} -gt 0 ]; then
+          varying_keys_json=$(printf '%s\n' "${varying_keys[@]}" | jq -R . | jq -s .)
+        else
+          varying_keys_json='[]'
+        fi
+
+        # Compute base image name (main-feature, sanitized)
+        main="${{ inputs.main }}"
+        feature="${{ inputs.feature }}"
+        base_raw="${main}-${feature}"
+        # Sanitize base name (same as downstream jobs)
+        base_sanitized=$(echo "$base_raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^[.-]*//;s/[.-]*$//')
+
         # Use simple index for clean GitHub Actions UI display
-        matrix_json=$(echo "$combinations" | jq -c '[
+        # Include varying_keys, pre-compute variant_suffix AND full image_name for each matrix item
+        matrix_json=$(echo "$combinations" | jq -c \
+          --argjson vk "$varying_keys_json" \
+          --arg base "$base_sanitized" \
+          '[
           to_entries |
           .[] |
           {
             index: (.key + 1),
-            values: .value
+            values: .value,
+            varying_keys: $vk,
+            variant_suffix: (
+              .value |
+              to_entries |
+              map(
+                select(.key as $k | $vk | contains([$k])) |
+                "-" + (.key | ascii_downcase) + "-" + (.value | tostring | ascii_downcase)
+              ) |
+              join("")
+            ),
+            image_name: (
+              $base + (
+                .value |
+                to_entries |
+                map(
+                  select(.key as $k | $vk | contains([$k])) |
+                  "-" + (.key | ascii_downcase) + "-" + (.value | tostring | ascii_downcase)
+                ) |
+                join("")
+              )
+            )
           }
         ] | {include: .}')
 

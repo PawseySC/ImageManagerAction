@@ -58,29 +58,16 @@ jobs:
       VERSION: ${{ inputs.version }}
       TARGETS: ${{ inputs.targets }}
     steps:
-    - name: Compute image name for this variant
-      id: compute_image_name
+    - name: Set image name for this variant
+      id: set_image_name
       run: |
         set -euo pipefail
 
-        # Get template values from matrix
-        template_values='${{ toJson(matrix.values) }}'
-        main="${{ inputs.main }}"
-        feature="${{ inputs.feature }}"
+        # Use pre-computed IMAGE_NAME from matrix (already sanitized)
+        IMAGE_NAME='${{ matrix.image_name }}'
 
-        # Compute variant suffix (same logic as BUILD job)
-        if [ "${{ inputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
-          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")' | tr '[:upper:]' '[:lower:]')
-        else
-          variant_suffix=""
-        fi
-
-        # Sanitize image name (same logic as BUILD job)
-        image_name_raw="${main}-${feature}${variant_suffix}"
-        image_name=$(echo "$image_name_raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^[.-]*//;s/[.-]*$//')
-
-        echo "IMAGE_NAME=$image_name" >> $GITHUB_ENV
-        echo "Computed image name: $image_name"
+        echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+        echo "Image name: $IMAGE_NAME"
 
     - name: Display public registry push plan
       run: |

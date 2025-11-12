@@ -425,6 +425,8 @@ jobs:
         with:
           manifest_path: ${{ steps.validate_manifest.outputs.branch_path }}/manifest.json
           dockerfile_path: ${{ steps.validate_manifest.outputs.dockerfile_path }}
+          main: ${{ steps.validate_manifest.outputs.main }}
+          feature: ${{ steps.validate_manifest.outputs.feature }}
 
       - name: Display build matrix configuration
         if: steps.validate_manifest.outputs.proceed_valid == 'true'

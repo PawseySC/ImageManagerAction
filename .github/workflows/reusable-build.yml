@@ -61,37 +61,40 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Compute variant suffix and display build info
+      - name: Set variant info and display build info
         id: compute_variant
         run: |
           set -euo pipefail
 
-          # Get template values from matrix
-          template_values='${{ toJson(matrix.values) }}'
+          # Get pre-computed values from matrix
+          IMAGE_NAME='${{ matrix.image_name }}'
+          VARIANT_SUFFIX='${{ matrix.variant_suffix }}'
           variant_index="${{ matrix.index }}"
 
-          # Compute variant name and suffix from template values
-          if [ "${{ inputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
-            # Generate variant name from template values (lowercase for container compatibility)
-            variant_name=$(echo "$template_values" | jq -r 'to_entries | map(.key + "-" + .value) | join("-")' | tr '[:upper:]' '[:lower:]')
-            variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")' | tr '[:upper:]' '[:lower:]')
+          # Generate variant name for display
+          if [ -n "$VARIANT_SUFFIX" ]; then
+            # Remove leading dash and use as variant name
+            variant_name="${VARIANT_SUFFIX#-}"
           else
             variant_name="default"
-            variant_suffix=""
           fi
+
+          # Export IMAGE_NAME for subsequent steps
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          echo "VARIANT_SUFFIX=$VARIANT_SUFFIX" >> $GITHUB_ENV
 
           echo "=========================================="
           echo "Build Environment"
           echo "=========================================="
           echo "Hostname: $(hostname)"
-          echo "Building: ${{ inputs.main }}/${{ inputs.feature }}:${{ inputs.version }}${variant_suffix}"
+          echo "Building: ${{ inputs.main }}/${{ inputs.feature }}:${{ inputs.version }}${VARIANT_SUFFIX}"
           echo "Platform: ${{ inputs.platform }}"
           echo "Correlation ID: ${{ inputs.correlation_id }}"
           echo "Variant #${variant_index}: $variant_name"
           echo "=========================================="
 
           # Export for use in subsequent steps
-          echo "VARIANT_SUFFIX=$variant_suffix" >> $GITHUB_ENV
+          echo "VARIANT_SUFFIX=$VARIANT_SUFFIX" >> $GITHUB_ENV
           echo "VARIANT_NAME=$variant_name" >> $GITHUB_ENV
 
       - name: Apply template values to Dockerfile
@@ -227,33 +230,13 @@ jobs:
           # Get variables from inputs
           branch_path="${{ inputs.branch_path }}"
           dockerfile_path="${{ inputs.dockerfile_path }}"
-          main="${{ inputs.main }}"
-          feature="${{ inputs.feature }}"
           version="${{ inputs.version }}"
 
-          # Function to sanitize Docker tag/name to comply with Docker naming rules
-          # Docker allows: lowercase letters, digits, hyphens, underscores, and periods
-          # Reference: https://docs.docker.com/engine/reference/commandline/tag/
-          sanitize_docker_name() {
-            local input="$1"
-            # Convert to lowercase
-            local sanitized=$(echo "$input" | tr '[:upper:]' '[:lower:]')
-            # Replace spaces and invalid characters with hyphens
-            sanitized=$(echo "$sanitized" | sed 's/[^a-z0-9._-]/-/g')
-            # Remove consecutive hyphens
-            sanitized=$(echo "$sanitized" | sed 's/-\+/-/g')
-            # Remove leading/trailing hyphens or dots
-            sanitized=$(echo "$sanitized" | sed 's/^[.-]*//;s/[.-]*$//')
-            echo "$sanitized"
-          }
-
-          # Create image name from main and feature and variant suffix, then sanitize it
-          # VARIANT_SUFFIX is set by compute_variant step (e.g., "-python-3.9" or "")
-          image_name_raw="${main}-${feature}${VARIANT_SUFFIX}"
-          image_name=$(sanitize_docker_name "$image_name_raw")
+          # Use pre-computed IMAGE_NAME from matrix (already sanitized)
+          image_name="$IMAGE_NAME"
           image_tag="${image_name}:${version}"
 
-          echo "Original image name: $image_name_raw"
+          echo "Image name: $image_name"
           echo "Sanitized image name: $image_name"
           echo "Variant suffix: ${VARIANT_SUFFIX}"
           echo "Final image tag: $image_tag"
