@@ -45,6 +45,8 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Create basic build environment with build tools and compilers
 FROM base-runtime AS base-build
+ARG PYTHON_VERSION
+ARG GCC_VERSION=11
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
     build-essential \
@@ -171,4 +173,4 @@ COPY --from=build-wheel-lightning-qubit /opt/pennylane-lightning/dist/ /
 RUN pip install --no-cache-dir --force-reinstall pennylane_lightning*.whl
 RUN pip install --no-cache-dir git+https://github.com/PennyLaneAI/pennylane.git@${PENNYLANE_VERSION}
 RUN pip install --no-cache-dir matplotlib jupyterlab
-LABEL org.opencontainers.image.version=0.0.3 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=false org.opencontainers.image.platform=arm
+LABEL org.opencontainers.image.version=0.0.4 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=false org.opencontainers.image.platform=arm
