@@ -1,17 +1,14 @@
 {
   "main": "ex3",
   "feature": "test3",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "devmode": true,
   "noscan": true,
   "platform": "x86",
   "shpc": false,
   "template": {
-    "DEBIAN_VERSION": [
-      "stretch",
-      "buster"
-    ],
-    "CURL_ENABLED": ["yes", "no"]
+    "DEBIAN_VERSION": "stretch",
+    "CURL_ENABLED": "yes"
   },
   "targets": [
     "quay.io"
