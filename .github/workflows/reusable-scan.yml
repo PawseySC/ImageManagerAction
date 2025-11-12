@@ -50,9 +50,25 @@ jobs:
         main="${{ inputs.main }}"
         feature="${{ inputs.feature }}"
 
-        # Compute variant suffix (same logic as BUILD job)
+        # Compute variant suffix - only include keys with multiple values
         if [ "${{ inputs.has_template }}" = "true" ] && [ "$template_values" != "{}" ]; then
-          variant_suffix=$(echo "$template_values" | jq -r 'to_entries | map("-" + .key + "-" + .value) | join("")' | tr '[:upper:]' '[:lower:]')
+          # Get all variant values from build matrix
+          build_matrix='${{ inputs.build_matrix }}'
+          all_values=$(echo "$build_matrix" | jq -c '[.include[].values]')
+
+          # For each key, check if it varies across all variants
+          variant_suffix=""
+          for key in $(echo "$template_values" | jq -r 'keys[]'); do
+            current_value=$(echo "$template_values" | jq -r --arg k "$key" '.[$k]')
+            unique_count=$(echo "$all_values" | jq --arg k "$key" '[.[].[$k]] | unique | length')
+
+            # Only include if this key has multiple different values
+            if [ "$unique_count" -gt 1 ]; then
+              key_lower=$(echo "$key" | tr '[:upper:]' '[:lower:]')
+              value_lower=$(echo "$current_value" | tr '[:upper:]' '[:lower:]')
+              variant_suffix="${variant_suffix}-${key_lower}-${value_lower}"
+            fi
+          done
         else
           variant_suffix=""
         fi
