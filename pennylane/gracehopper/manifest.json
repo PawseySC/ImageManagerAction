@@ -1,0 +1,34 @@
+{
+  "main": "pennylane",
+  "feature": "gracehopper",
+  "version": "0.0.3",
+  "devmode": true,
+  "noscan": false,
+  "platform": "arm",
+  "shpc": false,
+  "targets": [
+    "quay.io",
+    "setonix-registry"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-pennylane/gracehopper",
+    "path": "pennylane/gracehopper/"
+  },
+  "metadata": {
+    "timestamp": "2025-11-12T03:29:14.372013Z",
+    "correlation_id": "465fc2e5-9a07-4fef-8c22-4f4d856a8b0b"
+  },
+  "template": {
+    "PENNYLANE_VERSION": "master",
+    "PYTHON_VERSION": "3.11",
+    "CUDA_VER": "12.8.1",
+    "CUDA_ARCH": "HOPPER90",
+    "DEBIAN_FRONTEND": "noninteractive",
+    "GCC_VERSION": "11",
+    "LIGHTNING_VERSION": "master"
+  }
+}
