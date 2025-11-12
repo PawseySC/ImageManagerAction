@@ -260,7 +260,7 @@ jobs:
 
           # Configure Podman to allow short names without prompting
           # This is needed for non-interactive environments (GitHub Actions)
-          mkdir -p ~/.config/containers
+          mkdir -p ~/.config/containers/registries.conf.d
           cat > ~/.config/containers/registries.conf.d/shortnames.conf <<EOF
           unqualified-search-registries = ["docker.io"]
           short-name-mode = "permissive"
