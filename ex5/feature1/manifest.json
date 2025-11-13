@@ -1,10 +1,10 @@
 {
   "main": "ex5",
   "feature": "feature1",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "devmode": true,
   "noscan": true,
-  "platform": "x86",
+  "platform": "arm",
   "shpc": false,
   "targets": [
     "setonix-registry"
@@ -18,8 +18,8 @@
     "path": "ex5/feature1/"
   },
   "metadata": {
-    "timestamp": "2025-11-13T23:48:06.475033Z",
-    "correlation_id": "b21cc750-1744-47df-81cc-7d675bed5772"
+    "timestamp": "2025-11-13T23:51:38.735406Z",
+    "correlation_id": "9475ab40-d7b6-43f1-9d8c-07d52e6accf6"
   },
   "template": {
     "DEBIAN_VERSION": "stretch",

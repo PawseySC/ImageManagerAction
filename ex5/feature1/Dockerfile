@@ -16,4 +16,4 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 # default command
 CMD ["node", "-v"]
-LABEL org.opencontainers.image.version=0.0.6 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.7 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=arm
