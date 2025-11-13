@@ -1,0 +1,28 @@
+{
+  "main": "ex5",
+  "feature": "feature1",
+  "version": "0.0.6",
+  "devmode": true,
+  "noscan": true,
+  "platform": "x86",
+  "shpc": false,
+  "targets": [
+    "setonix-registry"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-ex5/feature1",
+    "path": "ex5/feature1/"
+  },
+  "metadata": {
+    "timestamp": "2025-11-13T23:48:06.475033Z",
+    "correlation_id": "b21cc750-1744-47df-81cc-7d675bed5772"
+  },
+  "template": {
+    "DEBIAN_VERSION": "stretch",
+    "CURL_ENABLED": "no"
+  }
+}
