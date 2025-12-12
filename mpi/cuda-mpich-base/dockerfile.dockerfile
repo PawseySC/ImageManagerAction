@@ -184,6 +184,19 @@ RUN mkdir -p /tmp/mpi-binaries-optional \
       touch /tmp/mpi-binaries-optional.tar.gz; \
     fi
 
+# Create a tar archive of MPI header files (required for mpi4py compilation)
+RUN mkdir -p /tmp/mpi-headers \
+ && (cp -a /usr/include/mpi* /tmp/mpi-headers/ 2>/dev/null || true) \
+ && (cp -a /usr/include/mpif* /tmp/mpi-headers/ 2>/dev/null || true) \
+ && if [ -d /usr/include/mpich ]; then \
+      cp -r /usr/include/mpich* /tmp/mpi-headers/ 2>/dev/null || true; \
+    fi \
+ && if [ -n "$(ls -A /tmp/mpi-headers/* 2>/dev/null)" ]; then \
+      tar czf /tmp/mpi-headers.tar.gz -C /tmp/mpi-headers .; \
+    else \
+      echo "Warning: No MPI headers found" && touch /tmp/mpi-headers.tar.gz; \
+    fi
+
 # ====================== Stage 2: Runtime (minimal runtime environment) ======================
 FROM ${IMAGE_NAME}:13.0.2-runtime-ubuntu${OS_VERSION} AS runtime
 
@@ -209,6 +222,13 @@ COPY --from=builder /usr/lib/libmpich* /usr/lib/
 COPY --from=builder /usr/lib/libmpl* /usr/lib/
 COPY --from=builder /usr/lib/libopa* /usr/lib/
 COPY --from=builder /usr/bin/mpi* /usr/bin/
+# Copy MPI header files (required for mpi4py compilation)
+COPY --from=builder /tmp/mpi-headers.tar.gz /tmp/
+RUN mkdir -p /usr/include \
+ && if [ -s /tmp/mpi-headers.tar.gz ]; then \
+      tar xzf /tmp/mpi-headers.tar.gz -C /usr/include/ 2>/dev/null || true; \
+    fi \
+ && rm -f /tmp/mpi-headers.tar.gz
 # Copy optional binaries (hydra* and parkill may not exist with gforker PM)
 COPY --from=builder /tmp/mpi-binaries-optional.tar.gz /tmp/
 RUN if [ -s /tmp/mpi-binaries-optional.tar.gz ]; then \
