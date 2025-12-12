@@ -10,7 +10,8 @@ ARG OSU_VERSION="7.3"
 ARG IMAGE_NAME="nvidia/cuda"
 
 # ====================== Stage 1: Builder (full build environment) ======================
-FROM ${IMAGE_NAME}:${CUDA_VERSION}-devel-ubuntu${OS_VERSION} AS builder
+# Use clean Ubuntu image to avoid NVIDIA CUDA image's broken C++ include paths
+FROM ubuntu:${OS_VERSION} AS builder
 
 ARG OS_VERSION
 ARG LINUX_KERNEL
@@ -21,11 +22,9 @@ ARG OSU_VERSION
 ARG ENABLE_OSU
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install all build dependencies (use system default compiler from Ubuntu 24.04)
-# libc6-dev and linux-libc-dev are required for C/C++ standard library headers (stdlib.h)
+# Install all build dependencies first (clean Ubuntu environment)
 RUN apt-get update -qq && apt-get -y --no-install-recommends install \
     build-essential gfortran \
-    libc6-dev linux-libc-dev \
     gnupg gnupg2 ca-certificates gdb wget git curl \
     python3-six python3-setuptools python3-numpy python3-pip python3-scipy python3-venv python3-dev \
     patchelf strace ltrace \
@@ -38,6 +37,21 @@ RUN apt-get update -qq && apt-get -y --no-install-recommends install \
     linux-headers-${LINUX_KERNEL}-generic linux-headers-${LINUX_KERNEL} \
     fakeroot devscripts dpkg-dev \
  && rm -rf /var/lib/apt/lists/*
+
+# Install CUDA toolkit from NVIDIA repository
+RUN wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb \
+ && dpkg -i cuda-keyring_1.1-1_all.deb \
+ && rm cuda-keyring_1.1-1_all.deb \
+ && apt-get update -qq \
+ && apt-get install -y --no-install-recommends \
+    cuda-toolkit-13-0 \
+    libnccl2 libnccl-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# Set CUDA environment variables
+ENV PATH="/usr/local/cuda/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+ENV CUDA_HOME="/usr/local/cuda"
 
 # Install modern CMake
 RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.31.7/cmake-3.31.7-linux-aarch64.sh \
@@ -111,16 +125,7 @@ RUN mkdir -p /tmp/mpich-build && cd /tmp/mpich-build \
  && cd / && rm -rf /tmp/mpich-build
 
 
-# Build aws-ofi-nccl (CUDA version of aws-ofi-rccl)
-# Debug: verify stdlib.h exists and check include paths
-RUN ls -la /usr/include/stdlib.h && echo "stdlib.h found" || echo "stdlib.h NOT FOUND"
-RUN echo | cpp -v 2>&1 | grep -A 20 "include"
-
-# Clear CUDA-related env vars that may interfere with include paths, then build
-ENV CPLUS_INCLUDE_PATH=""
-ENV C_INCLUDE_PATH=""
-ENV CPATH=""
-
+# Build aws-ofi-nccl (CUDA NCCL plugin for libfabric)
 RUN cd /tmp \
  && git clone --depth 1 https://github.com/aws/aws-ofi-nccl.git \
  && cd aws-ofi-nccl \
