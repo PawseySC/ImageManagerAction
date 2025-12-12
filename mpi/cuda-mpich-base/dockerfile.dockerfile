@@ -134,22 +134,22 @@ RUN echo "Building MPICH..." \
  && echo "Finished building MPICH"
 
 # Build aws-ofi-nccl (CUDA NCCL plugin for libfabric)
-RUN echo "Build aws-ofi-nccl" \
- && cd /tmp \
- && git clone --depth 1 https://github.com/aws/aws-ofi-nccl.git \
- && cd aws-ofi-nccl \
- && ./autogen.sh \
- && CC=gcc-12 CXX=g++-12 \
-    ./configure --prefix=/usr \
-                --with-mpi=/usr \
-                --with-libfabric=/usr \
-                --with-cuda=/usr/local/cuda \
-                LDFLAGS="-L/usr/local/cuda/lib64 -L/usr/local/cuda/lib64/stubs" \
- && make -j"$(nproc)" \
- && make install \
- && ldconfig \
- && cd /tmp && rm -rf aws-ofi-nccl \
- && echo "Done"
+# RUN echo "Build aws-ofi-nccl" \
+#  && cd /tmp \
+#  && git clone --depth 1 https://github.com/aws/aws-ofi-nccl.git \
+#  && cd aws-ofi-nccl \
+#  && ./autogen.sh \
+#  && CC=gcc-12 CXX=g++-12 \
+#     ./configure --prefix=/usr \
+#                 --with-mpi=/usr \
+#                 --with-libfabric=/usr \
+#                 --with-cuda=/usr/local/cuda \
+#                 LDFLAGS="-L/usr/local/cuda/lib64 -L/usr/local/cuda/lib64/stubs" \
+#  && make -j"$(nproc)" \
+#  && make install \
+#  && ldconfig \
+#  && cd /tmp && rm -rf aws-ofi-nccl \
+#  && echo "Done"
 
 # Build OSU microbenchmarks
 ARG OSU_CONFIGURE_OPTIONS="--prefix=/usr/local CC=mpicc CXX=mpicxx CFLAGS=-O3 --enable-cuda --with-cuda=/usr/local/cuda"
