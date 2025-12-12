@@ -24,7 +24,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install all build dependencies
 RUN apt-get update -qq && apt-get -y --no-install-recommends install \
     build-essential gcc-12 g++-12 gfortran-12 \
-    libc6-dev libc6-dev-arm64 \
+    libc6-dev \
     gnupg gnupg2 ca-certificates gdb wget git curl \
     python3-six python3-setuptools python3-numpy python3-pip python3-scipy python3-venv python3-dev \
     patchelf strace ltrace \
