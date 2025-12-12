@@ -32,6 +32,7 @@ RUN apt-get update -qq && apt-get -y --no-install-recommends install \
     subversion tzdata valgrind vim xsltproc zlib1g-dev ninja-build libnuma-dev swig \
     linux-tools-generic linux-source software-properties-common \
     libkeyutils-dev libnl-genl-3-dev libyaml-dev libmount-dev pkg-config \
+    libhwloc-dev hwloc \
     linux-headers-${LINUX_KERNEL}-generic linux-headers-${LINUX_KERNEL} \
     fakeroot devscripts dpkg-dev \
  && rm -rf /var/lib/apt/lists/*
