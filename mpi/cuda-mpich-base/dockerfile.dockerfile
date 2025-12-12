@@ -187,13 +187,14 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # Copy runtime files from builder
-COPY --from=builder /usr/lib/liblustreapi* /usr/lib/
-COPY --from=builder /usr/lib/libfabric* /usr/lib/
+# libfabric and lustre install to /usr/local/lib by default
+# mpich installs to /usr (--prefix=/usr)
+COPY --from=builder /usr/local/lib/liblustreapi* /usr/local/lib/
+COPY --from=builder /usr/local/lib/libfabric* /usr/local/lib/
 COPY --from=builder /usr/lib/libmpi* /usr/lib/
 COPY --from=builder /usr/lib/libmpich* /usr/lib/
 COPY --from=builder /usr/lib/libmpl* /usr/lib/
 COPY --from=builder /usr/lib/libopa* /usr/lib/
-COPY --from=builder /usr/lib/libnccl_net.so* /usr/lib/
 COPY --from=builder /usr/bin/mpi* /usr/bin/
 COPY --from=builder /usr/bin/hydra* /usr/bin/
 COPY --from=builder /usr/bin/parkill /usr/bin/
