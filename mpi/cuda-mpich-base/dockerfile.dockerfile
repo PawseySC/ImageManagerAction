@@ -39,7 +39,10 @@ RUN apt-get update -qq && apt-get -y --no-install-recommends install \
 # Install modern CMake
 RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.31.7/cmake-3.31.7-linux-aarch64.sh \
  && chmod +x cmake-3.31.7-linux-aarch64.sh \
- && yes | ./cmake-3.31.7-linux-aarch64.sh --prefix=/usr \
+ && ./cmake-3.31.7-linux-aarch64.sh --skip-license --prefix=/usr --include-subdir \
+ && ln -sf /usr/cmake-3.31.7-linux-aarch64/bin/cmake /usr/bin/cmake \
+ && ln -sf /usr/cmake-3.31.7-linux-aarch64/bin/ctest /usr/bin/ctest \
+ && ln -sf /usr/cmake-3.31.7-linux-aarch64/bin/cpack /usr/bin/cpack \
  && cmake --version \
  && rm -f cmake-3.31.7-linux-aarch64.sh
 
