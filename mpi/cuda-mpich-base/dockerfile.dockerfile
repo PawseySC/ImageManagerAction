@@ -196,7 +196,9 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     bash ca-certificates wget gnupg lsb-release \
     libnuma1 libgfortran5 libgcc-s1 libstdc++6 \
     libyaml-0-2 keyutils \
-    python3 python3-pip python3-venv \
+    python3 python3-pip python3-venv python3-dev \
+    gcc-12 g++-12 gfortran-12 \
+    libc6-dev \
     tzdata \
  && rm -rf /var/lib/apt/lists/*
 
@@ -227,7 +229,13 @@ COPY --from=builder /usr/local/libexec/osu-micro-benchmarks /usr/local/libexec/o
 
 RUN ldconfig
 
+# Install mpi4py (requires build tools)
 RUN pip install --break-system-packages mpi4py==${MPI4PY_VERSION}
+
+# Remove build tools to reduce image size (keep only runtime libraries)
+RUN apt-get remove -y gcc-12 g++-12 gfortran-12 libc6-dev python3-dev \
+ && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/usr/local/libexec/osu-micro-benchmarks/mpi/collective:/usr/local/libexec/osu-micro-benchmarks/mpi/one-sided:/usr/local/libexec/osu-micro-benchmarks/mpi/pt2pt:/usr/local/libexec/osu-micro-benchmarks/mpi/startup:$PATH" \
     NCCL_SOCKET_IFNAME=hsn \
