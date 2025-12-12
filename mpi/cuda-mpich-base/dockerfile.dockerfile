@@ -21,9 +21,10 @@ ARG OSU_VERSION
 ARG ENABLE_OSU
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install all build dependencies first (use gcc-12 like ROCm version for stability)
+# Build toolchain & headers
 RUN apt-get update -qq && apt-get -y --no-install-recommends install \
     build-essential \
+    libc6-dev \                       # <<< CHANGED: 确保 stdlib.h 等 C 头文件存在
     gcc-12 g++-12 gfortran-12 \
     gnupg gnupg2 ca-certificates gdb wget git curl \
     python3-six python3-setuptools python3-numpy python3-pip python3-scipy python3-venv python3-dev \
@@ -55,12 +56,11 @@ RUN wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/
  && rm -rf /var/lib/apt/lists/* \
  && ln -s /usr/local/cuda-13.0 /usr/local/cuda
 
-# Set CUDA environment variables
 ENV PATH="/usr/local/cuda/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 ENV CUDA_HOME="/usr/local/cuda"
 
-# Install modern CMake
+# Modern CMake
 RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.31.7/cmake-3.31.7-linux-aarch64.sh \
  && chmod +x cmake-3.31.7-linux-aarch64.sh \
  && ./cmake-3.31.7-linux-aarch64.sh --skip-license --prefix=/usr --include-subdir \
@@ -70,7 +70,7 @@ RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.31.7/cmake-3.3
  && cmake --version \
  && rm -f cmake-3.31.7-linux-aarch64.sh
 
-# Generate kernel config for Lustre
+# Kernel config for Lustre
 RUN echo "deb-src http://archive.ubuntu.com/ubuntu noble main restricted" >> /etc/apt/sources.list \
  && apt-get update -qq \
  && cd /tmp \
@@ -90,7 +90,7 @@ RUN mkdir -p /tmp/build && cd /tmp/build \
  && make -j"$(nproc)" && make install \
  && rm -rf /tmp/build/libfabric-*
 
-# Build Lustre (using GitHub mirror)
+# Build Lustre client
 RUN mkdir -p /tmp/lustre-build && cd /tmp/lustre-build \
  && for i in 1 2 3; do \
       echo "Cloning Lustre (attempt $i)..." && \
@@ -110,13 +110,13 @@ RUN mkdir -p /tmp/lustre-build && cd /tmp/lustre-build \
  && cd / && rm -rf /tmp/lustre-build
 
 # Build MPICH with Lustre support
-ARG MPICH_CONFIGURE_OPTIONS="--without-mpe --enable-fortran=all --enable-shared --enable-sharedlibs=gcc \
+ARG MPICH_CONFIGURE_OPTIONS="--prefix=/usr --without-mpe --enable-fortran=all --enable-shared --enable-sharedlibs=gcc \
 --enable-debuginfo --enable-yield=sched_yield --enable-g=mem \
 --with-device=ch4:ofi --with-namepublisher=file \
 --with-shared-memory=sysv --disable-allowport --with-pm=gforker \
 --with-file-system=ufs+lustre+nfs \
 --enable-threads=runtime --enable-fast=O2 --enable-thread-cs=global \
-CC=gcc-12 CXX=g++-12 FC=gfortran-12 FFLAGS=-fallow-argument-mismatch"
+CC=gcc-12 CXX=g++-12 FC=gfortran-12 FFLAGS=-fallow-argument-mismatch"  # <<< CHANGED: 加 prefix=/usr
 COPY mpich_patches.tgz /tmp/
 RUN echo "Building MPICH..." \
  && mkdir -p /tmp/mpich-build && cd /tmp/mpich-build \
@@ -133,19 +133,18 @@ RUN echo "Building MPICH..." \
  && cd / && rm -rf /tmp/mpich-build \
  && echo "Finished building MPICH"
 
-
 # Build aws-ofi-nccl (CUDA NCCL plugin for libfabric)
-# Use gcc-12/g++-12 explicitly like ROCm version for stability
 RUN echo "Build aws-ofi-nccl" \
  && cd /tmp \
  && git clone --depth 1 https://github.com/aws/aws-ofi-nccl.git \
  && cd aws-ofi-nccl \
  && ./autogen.sh \
- && ./configure --prefix=/usr --with-mpi=/usr --with-libfabric=/usr --with-cuda=/usr/local/cuda \
-    CC=gcc-12 CXX=g++-12 \
-    LDFLAGS="-L/usr/local/cuda/lib64 -L/usr/local/cuda/lib64/stubs" \
-    CFLAGS="-I/usr/local/cuda/include" \
-    CXXFLAGS="-I/usr/local/cuda/include" \
+ && CC=gcc-12 CXX=g++-12 \
+    ./configure --prefix=/usr \
+                --with-mpi=/usr \
+                --with-libfabric=/usr \
+                --with-cuda=/usr/local/cuda \
+                LDFLAGS="-L/usr/local/cuda/lib64 -L/usr/local/cuda/lib64/stubs" \
  && make -j"$(nproc)" \
  && make install \
  && ldconfig \
@@ -179,7 +178,6 @@ ARG CUDA_VERSION
 ARG ENABLE_OSU
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install minimal runtime dependencies
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     bash ca-certificates wget gnupg lsb-release \
     libnuma1 libgfortran5 libgcc-s1 libstdc++6 \
@@ -203,10 +201,8 @@ COPY --from=builder /usr/local/libexec/osu-micro-benchmarks /usr/local/libexec/o
 
 RUN ldconfig
 
-# Install mpi4py
 RUN pip install --break-system-packages mpi4py==${MPI4PY_VERSION}
 
-# Set up environment
 ENV PATH="/usr/local/libexec/osu-micro-benchmarks/mpi/collective:/usr/local/libexec/osu-micro-benchmarks/mpi/one-sided:/usr/local/libexec/osu-micro-benchmarks/mpi/pt2pt:/usr/local/libexec/osu-micro-benchmarks/mpi/startup:$PATH" \
     NCCL_SOCKET_IFNAME=hsn \
     CXI_FORK_SAFE=1 \
@@ -224,10 +220,8 @@ RUN mkdir -p /.singularity.d/env/ \
  && echo "export CUDA_PATH=/usr/local/cuda" >> /.singularity.d/env/91-environment.sh \
  && echo "export LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/lib64/stubs:\${LD_LIBRARY_PATH}" >> /.singularity.d/env/91-environment.sh
 
-# Cleanup
 RUN rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* || true
 
-# Debug: Check what was copied
 RUN echo "=== Runtime libraries check ===" \
  && ls -lh /usr/lib/liblustreapi* || echo "No Lustre libs" \
  && ls -lh /usr/lib/libmpi* || echo "No MPI libs" \
@@ -235,4 +229,4 @@ RUN echo "=== Runtime libraries check ===" \
  && which mpirun || echo "No mpirun"
 
 WORKDIR /workspace
-LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=arm
+LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86

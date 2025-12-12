@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "devmode": true,
   "noscan": true,
-  "platform": "arm",
+  "platform": "x86",
   "shpc": false,
   "targets": [
     "setonix-registry"
@@ -18,8 +18,8 @@
     "path": "mpi/cuda-mpich-base/"
   },
   "metadata": {
-    "timestamp": "2025-12-12T02:43:04.235785Z",
-    "correlation_id": "93c3a62c-44e8-434f-a3a2-342182b04a7d"
+    "timestamp": "2025-12-12T03:10:17.985972Z",
+    "correlation_id": "fae3fd69-5b8d-40cc-8522-3296fbf1c273"
   },
   "template": {
     "OS_VERSION": "24.04",
