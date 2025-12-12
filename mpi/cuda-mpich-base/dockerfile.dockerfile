@@ -174,6 +174,16 @@ RUN echo "=== Checking library locations ===" \
  && echo "--- MPICH libs ---" && find /usr -name "libmpich*" -type f 2>/dev/null | head -10 \
  && echo "=== Done ==="
 
+# Create a tar archive of optional MPI binaries (handles missing hydra* and parkill)
+RUN mkdir -p /tmp/mpi-binaries-optional \
+ && (cp -a /usr/bin/hydra* /tmp/mpi-binaries-optional/ 2>/dev/null || true) \
+ && (cp -a /usr/bin/parkill /tmp/mpi-binaries-optional/ 2>/dev/null || true) \
+ && if [ -n "$(ls -A /tmp/mpi-binaries-optional/* 2>/dev/null)" ]; then \
+      tar czf /tmp/mpi-binaries-optional.tar.gz -C /tmp/mpi-binaries-optional .; \
+    else \
+      touch /tmp/mpi-binaries-optional.tar.gz; \
+    fi
+
 # ====================== Stage 2: Runtime (minimal runtime environment) ======================
 FROM ${IMAGE_NAME}:13.0.2-runtime-ubuntu${OS_VERSION} AS runtime
 
@@ -197,8 +207,12 @@ COPY --from=builder /usr/lib/libmpich* /usr/lib/
 COPY --from=builder /usr/lib/libmpl* /usr/lib/
 COPY --from=builder /usr/lib/libopa* /usr/lib/
 COPY --from=builder /usr/bin/mpi* /usr/bin/
-COPY --from=builder /usr/bin/hydra* /usr/bin/
-COPY --from=builder /usr/bin/parkill /usr/bin/
+# Copy optional binaries (hydra* and parkill may not exist with gforker PM)
+COPY --from=builder /tmp/mpi-binaries-optional.tar.gz /tmp/
+RUN if [ -s /tmp/mpi-binaries-optional.tar.gz ]; then \
+      tar xzf /tmp/mpi-binaries-optional.tar.gz -C /usr/bin/ 2>/dev/null || true; \
+    fi \
+ && rm -f /tmp/mpi-binaries-optional.tar.gz
 
 # libfabric (installed to /usr/local by default)
 COPY --from=builder /usr/local/lib/libfabric* /usr/local/lib/
