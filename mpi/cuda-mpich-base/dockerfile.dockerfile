@@ -38,7 +38,7 @@ RUN apt-get update -qq && apt-get -y --no-install-recommends install \
     fakeroot devscripts dpkg-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# Install minimal CUDA packages from NVIDIA repository (avoid full toolkit that may break system)
+# Install CUDA packages from NVIDIA repository
 RUN wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb \
  && dpkg -i cuda-keyring_1.1-1_all.deb \
  && rm cuda-keyring_1.1-1_all.deb \
@@ -49,6 +49,8 @@ RUN wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/
     cuda-crt-${CUDA_VERSION} \
     cuda-cudart-${CUDA_VERSION} \
     cuda-driver-dev-${CUDA_VERSION} \
+    cuda-libraries-dev-${CUDA_VERSION} \
+    libcudnn9-dev-cuda-12 \
     libnccl2 libnccl-dev \
  && rm -rf /var/lib/apt/lists/* \
  && ln -s /usr/local/cuda-13.0 /usr/local/cuda
@@ -134,13 +136,16 @@ RUN echo "Building MPICH..." \
 
 # Build aws-ofi-nccl (CUDA NCCL plugin for libfabric)
 # Use gcc-12/g++-12 explicitly like ROCm version for stability
-ARG NCCL_CONFIGURE_OPTIONS="--prefix=/usr --with-mpi=/usr --with-libfabric=/usr --with-cuda=/usr/local/cuda CC=gcc-12 CXX=g++-12"
 RUN echo "Build aws-ofi-nccl" \
  && cd /tmp \
  && git clone --depth 1 https://github.com/aws/aws-ofi-nccl.git \
  && cd aws-ofi-nccl \
  && ./autogen.sh \
- && ./configure ${NCCL_CONFIGURE_OPTIONS} \
+ && ./configure --prefix=/usr --with-mpi=/usr --with-libfabric=/usr --with-cuda=/usr/local/cuda \
+    CC=gcc-12 CXX=g++-12 \
+    LDFLAGS="-L/usr/local/cuda/lib64 -L/usr/local/cuda/lib64/stubs" \
+    CFLAGS="-I/usr/local/cuda/include" \
+    CXXFLAGS="-I/usr/local/cuda/include" \
  && make -j"$(nproc)" \
  && make install \
  && ldconfig \
