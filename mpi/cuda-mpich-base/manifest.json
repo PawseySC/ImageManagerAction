@@ -18,8 +18,8 @@
     "path": "mpi/cuda-mpich-base/"
   },
   "metadata": {
-    "timestamp": "2025-12-12T01:34:24.337958Z",
-    "correlation_id": "596e890a-f7ae-4f4f-bc6c-c2a5c0303dd2"
+    "timestamp": "2025-12-12T02:33:49.134941Z",
+    "correlation_id": "31f4d7b6-2c40-4e71-b426-da5248f1423e"
   },
   "template": {
     "OS_VERSION": "24.04",
@@ -28,8 +28,10 @@
     "MPICH_VERSION": "3.4.3",
     "MPI4PY_VERSION": "3.1.5",
     "ENABLE_OSU": "1",
-    "CUDA_VERSION": "13.0.2",
+    "CUDA_VERSION": "13-0",
     "OSU_VERSION": "7.3",
-    "IMAGE_NAME": "nvidia/cuda"
+    "IMAGE_NAME": "nvidia/cuda",
+    "NCCL_CONFIGURE_OPTIONS": "--prefix=/usr --with-mpi=/usr --with-libfabric=/usr --with-cuda=/usr/local/cuda CC=gcc-12 CXX=g++-12",
+    "OSU_CONFIGURE_OPTIONS": "--prefix=/usr/local CC=mpicc CXX=mpicxx CFLAGS=-O3 --enable-cuda --with-cuda=/usr/local/cuda"
   }
 }

@@ -5,12 +5,11 @@ ARG LIBFABRIC_VERSION="1.18.1"
 ARG MPICH_VERSION="3.4.3"
 ARG MPI4PY_VERSION="3.1.5"
 ARG ENABLE_OSU="1"
-ARG CUDA_VERSION="13.0.2"
+ARG CUDA_VERSION="13-0"
 ARG OSU_VERSION="7.3"
 ARG IMAGE_NAME="nvidia/cuda"
 
 # ====================== Stage 1: Builder (full build environment) ======================
-# Use clean Ubuntu image to avoid NVIDIA CUDA image's broken C++ include paths
 FROM ubuntu:${OS_VERSION} AS builder
 
 ARG OS_VERSION
@@ -22,9 +21,10 @@ ARG OSU_VERSION
 ARG ENABLE_OSU
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install all build dependencies first (clean Ubuntu environment)
+# Install all build dependencies first (use gcc-12 like ROCm version for stability)
 RUN apt-get update -qq && apt-get -y --no-install-recommends install \
-    build-essential gfortran \
+    build-essential \
+    gcc-12 g++-12 gfortran-12 \
     gnupg gnupg2 ca-certificates gdb wget git curl \
     python3-six python3-setuptools python3-numpy python3-pip python3-scipy python3-venv python3-dev \
     patchelf strace ltrace \
@@ -38,15 +38,20 @@ RUN apt-get update -qq && apt-get -y --no-install-recommends install \
     fakeroot devscripts dpkg-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# Install CUDA toolkit from NVIDIA repository
+# Install minimal CUDA packages from NVIDIA repository (avoid full toolkit that may break system)
 RUN wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb \
  && dpkg -i cuda-keyring_1.1-1_all.deb \
  && rm cuda-keyring_1.1-1_all.deb \
  && apt-get update -qq \
  && apt-get install -y --no-install-recommends \
-    cuda-toolkit-13-0 \
+    cuda-cudart-dev-${CUDA_VERSION} \
+    cuda-nvcc-${CUDA_VERSION} \
+    cuda-crt-${CUDA_VERSION} \
+    cuda-cudart-${CUDA_VERSION} \
+    cuda-driver-dev-${CUDA_VERSION} \
     libnccl2 libnccl-dev \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && ln -s /usr/local/cuda-13.0 /usr/local/cuda
 
 # Set CUDA environment variables
 ENV PATH="/usr/local/cuda/bin:${PATH}"
@@ -103,49 +108,58 @@ RUN mkdir -p /tmp/lustre-build && cd /tmp/lustre-build \
  && cd / && rm -rf /tmp/lustre-build
 
 # Build MPICH with Lustre support
+ARG MPICH_CONFIGURE_OPTIONS="--without-mpe --enable-fortran=all --enable-shared --enable-sharedlibs=gcc \
+--enable-debuginfo --enable-yield=sched_yield --enable-g=mem \
+--with-device=ch4:ofi --with-namepublisher=file \
+--with-shared-memory=sysv --disable-allowport --with-pm=gforker \
+--with-file-system=ufs+lustre+nfs \
+--enable-threads=runtime --enable-fast=O2 --enable-thread-cs=global \
+CC=gcc-12 CXX=g++-12 FC=gfortran-12 FFLAGS=-fallow-argument-mismatch"
 COPY mpich_patches.tgz /tmp/
-RUN mkdir -p /tmp/mpich-build && cd /tmp/mpich-build \
+RUN echo "Building MPICH..." \
+ && mkdir -p /tmp/mpich-build && cd /tmp/mpich-build \
  && wget -q http://www.mpich.org/static/downloads/${MPICH_VERSION}/mpich-${MPICH_VERSION}.tar.gz \
  && tar xf mpich-${MPICH_VERSION}.tar.gz \
  && cd mpich-${MPICH_VERSION} \
  && tar xf /tmp/mpich_patches.tgz \
  && patch -p0 < csel.patch \
  && patch -p0 < ch4r_init.patch \
- && ./configure \
-      --without-mpe --enable-fortran=all --enable-shared --enable-sharedlibs=gcc \
-      --enable-debuginfo --enable-yield=sched_yield --enable-g=mem \
-      --with-device=ch4:ofi --with-namepublisher=file \
-      --with-shared-memory=sysv --disable-allowport --with-pm=gforker \
-      --with-file-system=ufs+lustre+nfs \
-      --enable-threads=runtime --enable-fast=O2 --enable-thread-cs=global \
-      FFLAGS=-fallow-argument-mismatch \
+ && ./configure ${MPICH_CONFIGURE_OPTIONS} \
  && make -j"$(nproc)" \
  && make install \
  && ldconfig \
- && cd / && rm -rf /tmp/mpich-build
+ && cd / && rm -rf /tmp/mpich-build \
+ && echo "Finished building MPICH"
 
 
 # Build aws-ofi-nccl (CUDA NCCL plugin for libfabric)
-RUN cd /tmp \
+# Use gcc-12/g++-12 explicitly like ROCm version for stability
+ARG NCCL_CONFIGURE_OPTIONS="--prefix=/usr --with-mpi=/usr --with-libfabric=/usr --with-cuda=/usr/local/cuda CC=gcc-12 CXX=g++-12"
+RUN echo "Build aws-ofi-nccl" \
+ && cd /tmp \
  && git clone --depth 1 https://github.com/aws/aws-ofi-nccl.git \
  && cd aws-ofi-nccl \
  && ./autogen.sh \
- && ./configure --prefix=/usr --with-mpi=/usr --with-libfabric=/usr --with-cuda=/usr/local/cuda \
+ && ./configure ${NCCL_CONFIGURE_OPTIONS} \
  && make -j"$(nproc)" \
  && make install \
  && ldconfig \
- && cd /tmp && rm -rf aws-ofi-nccl
+ && cd /tmp && rm -rf aws-ofi-nccl \
+ && echo "Done"
 
 # Build OSU microbenchmarks
+ARG OSU_CONFIGURE_OPTIONS="--prefix=/usr/local CC=mpicc CXX=mpicxx CFLAGS=-O3 --enable-cuda --with-cuda=/usr/local/cuda"
 RUN if [ "${ENABLE_OSU}" = "1" ]; then \
+      echo "Building OSU..." && \
       cd /tmp && \
       wget -q http://mvapich.cse.ohio-state.edu/download/mvapich/osu-micro-benchmarks-${OSU_VERSION}.tar.gz && \
       tar xf osu-micro-benchmarks-${OSU_VERSION}.tar.gz && \
       cd osu-micro-benchmarks-${OSU_VERSION} && \
-      ./configure --prefix=/usr/local CC=mpicc CXX=mpicxx CFLAGS=-O3 --enable-cuda --with-cuda=/usr/local/cuda && \
+      ./configure ${OSU_CONFIGURE_OPTIONS} && \
       make -j"$(nproc)" && \
       make install && \
-      cd /tmp && rm -rf osu-micro-benchmarks-*; \
+      cd /tmp && rm -rf osu-micro-benchmarks-* && \
+      echo "Done"; \
     fi
 
 # Check installed files for debugging
@@ -153,8 +167,7 @@ RUN echo "=== Checking Lustre files ===" \
  && find /usr -name "*lustre*" -o -name "liblustreapi*" 2>/dev/null | head -20 || true
 
 # ====================== Stage 2: Runtime (minimal runtime environment) ======================
-ARG TARGETARCH
-FROM ${IMAGE_NAME}:${CUDA_VERSION}-runtime-ubuntu${OS_VERSION} AS runtime
+FROM ${IMAGE_NAME}:13.0.2-runtime-ubuntu${OS_VERSION} AS runtime
 
 ARG MPI4PY_VERSION
 ARG CUDA_VERSION
