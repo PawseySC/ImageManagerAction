@@ -22,8 +22,10 @@ ARG ENABLE_OSU
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install all build dependencies (use system default compiler from Ubuntu 24.04)
+# libc6-dev and linux-libc-dev are required for C/C++ standard library headers (stdlib.h)
 RUN apt-get update -qq && apt-get -y --no-install-recommends install \
     build-essential gfortran \
+    libc6-dev linux-libc-dev \
     gnupg gnupg2 ca-certificates gdb wget git curl \
     python3-six python3-setuptools python3-numpy python3-pip python3-scipy python3-venv python3-dev \
     patchelf strace ltrace \
@@ -110,6 +112,15 @@ RUN mkdir -p /tmp/mpich-build && cd /tmp/mpich-build \
 
 
 # Build aws-ofi-nccl (CUDA version of aws-ofi-rccl)
+# Debug: verify stdlib.h exists and check include paths
+RUN ls -la /usr/include/stdlib.h && echo "stdlib.h found" || echo "stdlib.h NOT FOUND"
+RUN echo | cpp -v 2>&1 | grep -A 20 "include"
+
+# Clear CUDA-related env vars that may interfere with include paths, then build
+ENV CPLUS_INCLUDE_PATH=""
+ENV C_INCLUDE_PATH=""
+ENV CPATH=""
+
 RUN cd /tmp \
  && git clone --depth 1 https://github.com/aws/aws-ofi-nccl.git \
  && cd aws-ofi-nccl \
