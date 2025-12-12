@@ -166,9 +166,13 @@ RUN if [ "${ENABLE_OSU}" = "1" ]; then \
       echo "Done"; \
     fi
 
-# Check installed files for debugging
-RUN echo "=== Checking Lustre files ===" \
- && find /usr -name "*lustre*" -o -name "liblustreapi*" 2>/dev/null | head -20 || true
+# Check installed files for debugging - find actual library locations
+RUN echo "=== Checking library locations ===" \
+ && echo "--- Lustre libs ---" && find /usr -name "liblustreapi*" -type f 2>/dev/null \
+ && echo "--- libfabric libs ---" && find /usr -name "libfabric*" -type f 2>/dev/null \
+ && echo "--- MPI libs ---" && find /usr -name "libmpi*" -type f 2>/dev/null | head -10 \
+ && echo "--- MPICH libs ---" && find /usr -name "libmpich*" -type f 2>/dev/null | head -10 \
+ && echo "=== Done ==="
 
 # ====================== Stage 2: Runtime (minimal runtime environment) ======================
 FROM ${IMAGE_NAME}:13.0.2-runtime-ubuntu${OS_VERSION} AS runtime
@@ -186,11 +190,8 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     tzdata \
  && rm -rf /var/lib/apt/lists/*
 
-# Copy runtime files from builder
-# libfabric and lustre install to /usr/local/lib by default
-# mpich installs to /usr (--prefix=/usr)
-COPY --from=builder /usr/local/lib/liblustreapi* /usr/local/lib/
-COPY --from=builder /usr/local/lib/libfabric* /usr/local/lib/
+# Copy runtime files from builder using multi-stage COPY
+# MPI libraries and binaries (installed to /usr with --prefix=/usr)
 COPY --from=builder /usr/lib/libmpi* /usr/lib/
 COPY --from=builder /usr/lib/libmpich* /usr/lib/
 COPY --from=builder /usr/lib/libmpl* /usr/lib/
@@ -198,6 +199,16 @@ COPY --from=builder /usr/lib/libopa* /usr/lib/
 COPY --from=builder /usr/bin/mpi* /usr/bin/
 COPY --from=builder /usr/bin/hydra* /usr/bin/
 COPY --from=builder /usr/bin/parkill /usr/bin/
+
+# libfabric (installed to /usr/local by default)
+COPY --from=builder /usr/local/lib/libfabric* /usr/local/lib/
+
+# Lustre libraries (check actual location - may be in /usr/lib or /usr/lib64)
+# Using RUN to handle flexible paths
+RUN mkdir -p /usr/lib /usr/local/lib /usr/lib64
+COPY --from=builder /usr/lib/liblustreapi* /usr/lib/
+
+# OSU benchmarks
 COPY --from=builder /usr/local/libexec/osu-micro-benchmarks /usr/local/libexec/osu-micro-benchmarks
 
 RUN ldconfig
