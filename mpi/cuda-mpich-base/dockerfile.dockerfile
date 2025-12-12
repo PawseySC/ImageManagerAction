@@ -24,6 +24,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install all build dependencies
 RUN apt-get update -qq && apt-get -y --no-install-recommends install \
     build-essential gcc-12 g++-12 gfortran-12 \
+    libc6-dev libc6-dev-arm64 \
     gnupg gnupg2 ca-certificates gdb wget git curl \
     python3-six python3-setuptools python3-numpy python3-pip python3-scipy python3-venv python3-dev \
     patchelf strace ltrace \
@@ -201,4 +202,4 @@ RUN echo "=== Runtime libraries check ===" \
  && which mpirun || echo "No mpirun"
 
 WORKDIR /workspace
-LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=false org.opencontainers.image.platform=arm
+LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=arm

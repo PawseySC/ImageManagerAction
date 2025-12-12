@@ -3,7 +3,7 @@
   "feature": "cuda-mpich-base",
   "version": "0.0.1",
   "devmode": true,
-  "noscan": false,
+  "noscan": true,
   "platform": "arm",
   "shpc": false,
   "targets": [
@@ -18,8 +18,8 @@
     "path": "mpi/cuda-mpich-base/"
   },
   "metadata": {
-    "timestamp": "2025-12-12T00:33:56.679855Z",
-    "correlation_id": "a4481fd7-fb90-4b52-99db-a75556aec774"
+    "timestamp": "2025-12-12T00:43:21.137536Z",
+    "correlation_id": "824fc54e-04f6-4c83-b32b-29ba2f10cafc"
   },
   "template": {
     "OS_VERSION": "24.04",
