@@ -21,10 +21,9 @@ ARG OSU_VERSION
 ARG ENABLE_OSU
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install all build dependencies
+# Install all build dependencies (use system default compiler from Ubuntu 24.04)
 RUN apt-get update -qq && apt-get -y --no-install-recommends install \
-    build-essential gcc-12 g++-12 gfortran-12 \
-    libc6-dev \
+    build-essential gfortran \
     gnupg gnupg2 ca-certificates gdb wget git curl \
     python3-six python3-setuptools python3-numpy python3-pip python3-scipy python3-venv python3-dev \
     patchelf strace ltrace \
@@ -103,7 +102,7 @@ RUN mkdir -p /tmp/mpich-build && cd /tmp/mpich-build \
       --with-shared-memory=sysv --disable-allowport --with-pm=gforker \
       --with-file-system=ufs+lustre+nfs \
       --enable-threads=runtime --enable-fast=O2 --enable-thread-cs=global \
-      CC=gcc-12 CXX=g++-12 FC=gfortran-12 FFLAGS=-fallow-argument-mismatch \
+      FFLAGS=-fallow-argument-mismatch \
  && make -j"$(nproc)" \
  && make install \
  && ldconfig \
@@ -115,7 +114,7 @@ RUN cd /tmp \
  && git clone --depth 1 https://github.com/aws/aws-ofi-nccl.git \
  && cd aws-ofi-nccl \
  && ./autogen.sh \
- && ./configure --prefix=/usr --with-mpi=/usr --with-libfabric=/usr --with-cuda=/usr/local/cuda --with-nccl=/usr CC=gcc-12 CXX=g++-12 \
+ && ./configure --prefix=/usr --with-mpi=/usr --with-libfabric=/usr --with-cuda=/usr/local/cuda \
  && make -j"$(nproc)" \
  && make install \
  && ldconfig \
