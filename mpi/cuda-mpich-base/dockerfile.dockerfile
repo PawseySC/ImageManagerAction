@@ -6,6 +6,7 @@ ARG MPICH_VERSION="3.4.3"
 ARG MPI4PY_VERSION="3.1.5"
 ARG ENABLE_OSU="1"
 ARG CUDA_VERSION="13-0"
+ARG CUDA_RUNTIME_VERSION="13.0.2"
 ARG OSU_VERSION="7.3"
 ARG IMAGE_NAME="nvidia/cuda"
 
@@ -17,6 +18,7 @@ ARG LINUX_KERNEL
 ARG LIBFABRIC_VERSION
 ARG MPICH_VERSION
 ARG CUDA_VERSION
+ARG CUDA_RUNTIME_VERSION
 ARG OSU_VERSION
 ARG ENABLE_OSU
 ENV DEBIAN_FRONTEND=noninteractive
@@ -54,7 +56,9 @@ RUN wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/
     libcudnn9-dev-cuda-12 \
     libnccl2 libnccl-dev \
  && rm -rf /var/lib/apt/lists/* \
- && ln -s /usr/local/cuda-13.0 /usr/local/cuda
+ && CUDA_MAJOR=$(echo ${CUDA_VERSION} | cut -d'-' -f1) \
+ && CUDA_MINOR=$(echo ${CUDA_VERSION} | cut -d'-' -f2) \
+ && ln -sf /usr/local/cuda-${CUDA_MAJOR}.${CUDA_MINOR} /usr/local/cuda
 
 ENV PATH="/usr/local/cuda/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
@@ -88,7 +92,7 @@ RUN mkdir -p /tmp/build && cd /tmp/build \
  && cd libfabric-${LIBFABRIC_VERSION} \
  && ./autogen.sh && ./configure \
  && make -j"$(nproc)" && make install \
- && rm -rf /tmp/build/libfabric-*
+ && cd / && rm -rf /tmp/build
 
 # Build Lustre client
 RUN mkdir -p /tmp/lustre-build && cd /tmp/lustre-build \
@@ -116,7 +120,7 @@ ARG MPICH_CONFIGURE_OPTIONS="--prefix=/usr --without-mpe --enable-fortran=all --
 --with-shared-memory=sysv --disable-allowport --with-pm=gforker \
 --with-file-system=ufs+lustre+nfs \
 --enable-threads=runtime --enable-fast=O2 --enable-thread-cs=global \
-CC=gcc-12 CXX=g++-12 FC=gfortran-12 FFLAGS=-fallow-argument-mismatch"  # <<< CHANGED: 加 prefix=/usr
+CC=gcc-12 CXX=g++-12 FC=gfortran-12 FFLAGS=-fallow-argument-mismatch"
 COPY mpich_patches.tgz /tmp/
 RUN echo "Building MPICH..." \
  && mkdir -p /tmp/mpich-build && cd /tmp/mpich-build \
@@ -166,14 +170,6 @@ RUN if [ "${ENABLE_OSU}" = "1" ]; then \
       echo "Done"; \
     fi
 
-# Check installed files for debugging - find actual library locations
-RUN echo "=== Checking library locations ===" \
- && echo "--- Lustre libs ---" && find /usr -name "liblustreapi*" -type f 2>/dev/null \
- && echo "--- libfabric libs ---" && find /usr -name "libfabric*" -type f 2>/dev/null \
- && echo "--- MPI libs ---" && find /usr -name "libmpi*" -type f 2>/dev/null | head -10 \
- && echo "--- MPICH libs ---" && find /usr -name "libmpich*" -type f 2>/dev/null | head -10 \
- && echo "=== Done ==="
-
 # Create a tar archive of optional MPI binaries (handles missing hydra* and parkill)
 RUN mkdir -p /tmp/mpi-binaries-optional \
  && (cp -a /usr/bin/hydra* /tmp/mpi-binaries-optional/ 2>/dev/null || true) \
@@ -182,7 +178,8 @@ RUN mkdir -p /tmp/mpi-binaries-optional \
       tar czf /tmp/mpi-binaries-optional.tar.gz -C /tmp/mpi-binaries-optional .; \
     else \
       touch /tmp/mpi-binaries-optional.tar.gz; \
-    fi
+    fi \
+ && rm -rf /tmp/mpi-binaries-optional
 
 # Create a tar archive of MPI header files (required for mpi4py compilation)
 RUN mkdir -p /tmp/mpi-headers \
@@ -195,10 +192,16 @@ RUN mkdir -p /tmp/mpi-headers \
       tar czf /tmp/mpi-headers.tar.gz -C /tmp/mpi-headers .; \
     else \
       echo "Warning: No MPI headers found" && touch /tmp/mpi-headers.tar.gz; \
-    fi
+    fi \
+ && rm -rf /tmp/mpi-headers
 
 # ====================== Stage 2: Runtime (minimal runtime environment) ======================
-FROM ${IMAGE_NAME}:13.0.2-runtime-ubuntu${OS_VERSION} AS runtime
+# CUDA runtime version for base image tag (e.g., "13.0.2" for CUDA_VERSION="13-0")
+# This should match the patch version of the CUDA runtime image
+ARG CUDA_RUNTIME_VERSION="13.0.2"
+ARG OS_VERSION
+ARG IMAGE_NAME
+FROM ${IMAGE_NAME}:${CUDA_RUNTIME_VERSION}-runtime-ubuntu${OS_VERSION} AS runtime
 
 ARG MPI4PY_VERSION
 ARG CUDA_VERSION
@@ -244,8 +247,12 @@ COPY --from=builder /usr/local/lib/libfabric* /usr/local/lib/
 RUN mkdir -p /usr/lib /usr/local/lib /usr/lib64
 COPY --from=builder /usr/lib/liblustreapi* /usr/lib/
 
-# OSU benchmarks
+# OSU benchmarks (only if enabled)
+RUN mkdir -p /usr/local/libexec
 COPY --from=builder /usr/local/libexec/osu-micro-benchmarks /usr/local/libexec/osu-micro-benchmarks
+RUN if [ "${ENABLE_OSU}" != "1" ] && [ -d /usr/local/libexec/osu-micro-benchmarks ]; then \
+      rm -rf /usr/local/libexec/osu-micro-benchmarks; \
+    fi
 
 RUN ldconfig
 
@@ -257,13 +264,16 @@ RUN apt-get remove -y gcc-12 g++-12 gfortran-12 libc6-dev python3-dev \
  && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
 
-ENV PATH="/usr/local/libexec/osu-micro-benchmarks/mpi/collective:/usr/local/libexec/osu-micro-benchmarks/mpi/one-sided:/usr/local/libexec/osu-micro-benchmarks/mpi/pt2pt:/usr/local/libexec/osu-micro-benchmarks/mpi/startup:$PATH" \
-    NCCL_SOCKET_IFNAME=hsn \
+ENV NCCL_SOCKET_IFNAME=hsn \
     CXI_FORK_SAFE=1 \
     CXI_FORK_SAFE_HP=1 \
     FI_CXI_DISABLE_CQ_HUGETLB=1 \
     CUDA_PATH=/usr/local/cuda \
-    LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/lib64/stubs:${LD_LIBRARY_PATH}
+    LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:/usr/local/cuda/lib64/stubs:${LD_LIBRARY_PATH}
+# Add OSU to PATH if enabled (paths are harmless if directory doesn't exist)
+RUN if [ "${ENABLE_OSU}" = "1" ]; then \
+      echo 'export PATH="/usr/local/libexec/osu-micro-benchmarks/mpi/collective:/usr/local/libexec/osu-micro-benchmarks/mpi/one-sided:/usr/local/libexec/osu-micro-benchmarks/mpi/pt2pt:/usr/local/libexec/osu-micro-benchmarks/mpi/startup:$PATH"' >> /etc/profile.d/osu.sh; \
+    fi
 
 # Singularity environment injection
 RUN mkdir -p /.singularity.d/env/ \
@@ -272,15 +282,17 @@ RUN mkdir -p /.singularity.d/env/ \
  && echo "export CXI_FORK_SAFE_HP=1" >> /.singularity.d/env/91-environment.sh \
  && echo "export FI_CXI_DISABLE_CQ_HUGETLB=1" >> /.singularity.d/env/91-environment.sh \
  && echo "export CUDA_PATH=/usr/local/cuda" >> /.singularity.d/env/91-environment.sh \
- && echo "export LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/lib64/stubs:\${LD_LIBRARY_PATH}" >> /.singularity.d/env/91-environment.sh
+ && echo "export LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:/usr/local/cuda/lib64/stubs:\${LD_LIBRARY_PATH}" >> /.singularity.d/env/91-environment.sh
 
 RUN rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* || true
 
 RUN echo "=== Runtime libraries check ===" \
  && ls -lh /usr/lib/liblustreapi* || echo "No Lustre libs" \
  && ls -lh /usr/lib/libmpi* || echo "No MPI libs" \
- && which mpicc || echo "No mpicc" \
- && which mpirun || echo "No mpirun"
+ && echo "--- MPI executables ---" \
+ && (which mpicc && echo "mpicc: $(which mpicc)") || echo "No mpicc" \
+ && (which mpiexec && echo "mpiexec: $(which mpiexec)") || echo "No mpiexec" \
+ && (which mpirun && echo "mpirun: $(which mpirun)") || echo "No mpirun (using gforker PM, mpiexec should be used instead)"
 
 WORKDIR /workspace
 LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=arm
