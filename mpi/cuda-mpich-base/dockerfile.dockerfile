@@ -229,4 +229,4 @@ RUN echo "=== Runtime libraries check ===" \
  && which mpirun || echo "No mpirun"
 
 WORKDIR /workspace
-LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=x86
+LABEL org.opencontainers.image.version=0.0.1 org.opencontainers.image.devmode=true org.opencontainers.image.noscan=true org.opencontainers.image.platform=arm
