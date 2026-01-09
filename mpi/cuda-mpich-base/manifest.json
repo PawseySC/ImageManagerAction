@@ -1,0 +1,36 @@
+{
+  "main": "mpi",
+  "feature": "cuda-mpich-base",
+  "version": "0.0.1",
+  "devmode": true,
+  "noscan": true,
+  "platform": "arm",
+  "shpc": false,
+  "targets": [
+    "setonix-registry"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "Quleaf/ImageManagerAction",
+    "branch": "cicd-mpi/cuda-mpich-base",
+    "path": "mpi/cuda-mpich-base/"
+  },
+  "metadata": {
+    "timestamp": "2025-12-12T03:40:54.769384Z",
+    "correlation_id": "812057ba-44ee-41f1-8249-2438f9e8b78b"
+  },
+  "template": {
+    "OS_VERSION": "24.04",
+    "LINUX_KERNEL": "6.8.0-31",
+    "LIBFABRIC_VERSION": "1.18.1",
+    "MPICH_VERSION": "3.4.3",
+    "MPI4PY_VERSION": "3.1.5",
+    "ENABLE_OSU": "1",
+    "CUDA_VERSION": "13-0",
+    "OSU_VERSION": "7.3",
+    "IMAGE_NAME": "nvidia/cuda",
+    "OSU_CONFIGURE_OPTIONS": "--prefix=/usr/local CC=mpicc CXX=mpicxx CFLAGS=-O3 --enable-cuda --with-cuda=/usr/local/cuda"
+  }
+}
