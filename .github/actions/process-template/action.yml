@@ -38,12 +38,24 @@ runs:
         echo "Processing template from: $manifest_file"
         echo "Target Dockerfile: $dockerfile"
 
+        # Compute the base image name (main-feature, sanitized) up front; we need it
+        # in BOTH the no-template fast path and the cartesian-product path.
+        main="${{ inputs.main }}"
+        feature="${{ inputs.feature }}"
+        base_raw="${main}-${feature}"
+        base_sanitized=$(echo "$base_raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^[.-]*//;s/[.-]*$//')
+
         # Check if template field exists
         if ! jq -e '.template' "$manifest_file" > /dev/null 2>&1; then
           echo "No template field found in manifest.json"
           echo "has_template=false" >> $GITHUB_OUTPUT
           echo "variant_count=1" >> $GITHUB_OUTPUT
-          echo "matrix={\"include\":[{\"index\":1,\"values\":{}}]}" >> $GITHUB_OUTPUT
+          # Single-variant matrix MUST still carry image_name + variant_suffix; the
+          # downstream BUILD job reads them as `${{ matrix.image_name }}` and an empty
+          # value produces a `tag :version: invalid reference format` error.
+          single_matrix=$(jq -nc --arg img "$base_sanitized" \
+            '{include: [{index: 1, values: {}, varying_keys: [], variant_suffix: "", image_name: $img}]}')
+          echo "matrix=$single_matrix" >> $GITHUB_OUTPUT
           exit 0
         fi
 
@@ -143,12 +155,7 @@ runs:
           varying_keys_json='[]'
         fi
 
-        # Compute base image name (main-feature, sanitized)
-        main="${{ inputs.main }}"
-        feature="${{ inputs.feature }}"
-        base_raw="${main}-${feature}"
-        # Sanitize base name (same as downstream jobs)
-        base_sanitized=$(echo "$base_raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^[.-]*//;s/[.-]*$//')
+        # base_sanitized was computed earlier, before the no-template fast path.
 
         # Use simple index for clean GitHub Actions UI display
         # Include varying_keys, pre-compute variant_suffix AND full image_name for each matrix item
