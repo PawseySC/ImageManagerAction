@@ -158,10 +158,10 @@ jobs:
     # Quay.io Push (Only if in targets)
     # ============================================
     - name: Push to Quay.io public registry
+      id: push_quayio
       if: inputs.quayio_available == 'true' && contains(inputs.targets, 'quay.io')
-      continue-on-error: true
       run: |
-        set +e  # Don't exit on errors to allow independent execution
+        set -euo pipefail
         echo "=========================================="
         echo " Quay.io Push Process"
         echo "=========================================="
@@ -218,10 +218,11 @@ jobs:
     # Setonix Public Registry Push (Only if in targets)
     # ============================================
     - name: Push to Setonix public registry
-      if: inputs.setonixreg_available == 'true' && contains(inputs.targets, 'setonix-registry')
-      continue-on-error: true
+      id: push_setonix_public
+      # Run independently of Quay.io result so a single registry failure doesn't mask the other.
+      if: always() && inputs.setonixreg_available == 'true' && contains(inputs.targets, 'setonix-registry')
       run: |
-        set +e  # Don't exit on errors to allow independent execution
+        set -euo pipefail
         echo "=========================================="
         echo " Setonix Public Registry Push Process"
         echo "=========================================="

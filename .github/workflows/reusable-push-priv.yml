@@ -102,9 +102,8 @@ jobs:
 
     - name: Push to Setonix private registry
       if: inputs.setonixreg_available == 'true'
-      continue-on-error: true
       run: |
-        set +e  # Don't exit on errors to allow independent execution
+        set -euo pipefail
         echo "=========================================="
         echo " Setonix Registry Push Process"
         echo "=========================================="

@@ -40,7 +40,7 @@ jobs:
 
   SCAN:
     needs: [PREPARE, BUILD]
-    if: needs.PREPARE.outputs.proceed_valid == 'true' && needs.PREPARE.outputs.noscan != 'true'
+    if: needs.PREPARE.outputs.proceed_valid == 'true' && needs.PREPARE.outputs.scan == 'true'
     uses: ./.github/workflows/reusable-scan.yml
     with:
       runner_label: ${{ needs.PREPARE.outputs.runner_label }}

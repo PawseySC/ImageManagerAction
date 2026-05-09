@@ -31,9 +31,9 @@ on:
       devmode:
         description: "Development mode flag"
         value: ${{ jobs.prepare.outputs.devmode }}
-      noscan:
-        description: "Skip security scan flag"
-        value: ${{ jobs.prepare.outputs.noscan }}
+      scan:
+        description: "Run security scan flag (true = run scan)"
+        value: ${{ jobs.prepare.outputs.scan }}
       platform:
         description: "Target platform (x86/arm)"
         value: ${{ jobs.prepare.outputs.platform }}
@@ -89,7 +89,7 @@ jobs:
       feature: ${{ steps.validate_manifest.outputs.feature }}
       version: ${{ steps.validate_manifest.outputs.version }}
       devmode: ${{ steps.validate_manifest.outputs.devmode }}
-      noscan: ${{ steps.validate_manifest.outputs.noscan }}
+      scan: ${{ steps.validate_manifest.outputs.scan }}
       platform: ${{ steps.validate_manifest.outputs.platform }}
       shpc: ${{ steps.validate_manifest.outputs.shpc }}
       targets: ${{ steps.validate_manifest.outputs.targets }}
@@ -306,7 +306,9 @@ jobs:
           feature=$(jq -r '.feature // empty' "$manifest_file")
           version=$(jq -r '.version // empty' "$manifest_file")
           devmode=$(jq -r '.devmode // false' "$manifest_file")
-          noscan=$(jq -r '.noscan // false' "$manifest_file")
+          # `scan` is the source of truth in the new manifest format (default: true).
+          # Legacy `noscan` is honored only if `scan` is absent.
+          scan=$(jq -r 'if has("scan") then .scan else (if .noscan == true then false else true end) end' "$manifest_file")
           platform=$(jq -r '.platform // "x86"' "$manifest_file")
           shpc=$(jq -r '.shpc // false' "$manifest_file")
           targets=$(jq -c '.targets // []' "$manifest_file")
@@ -373,7 +375,7 @@ jobs:
           echo "Version (from manifest): $version"
           echo "Version (with platform): $version_with_platform"
           echo "Dev Mode: $devmode"
-          echo "No Scan: $noscan"
+          echo "Run Scan: $scan"
           echo "Platform: $platform"
           echo "SHPC Deploy: $shpc"
           echo "Targets: $targets"
@@ -389,7 +391,7 @@ jobs:
           echo "feature=$feature" >> $GITHUB_OUTPUT
           echo "version=$version_with_platform" >> $GITHUB_OUTPUT
           echo "devmode=$devmode" >> $GITHUB_OUTPUT
-          echo "noscan=$noscan" >> $GITHUB_OUTPUT
+          echo "scan=$scan" >> $GITHUB_OUTPUT
           echo "platform=$platform" >> $GITHUB_OUTPUT
           echo "shpc=$shpc" >> $GITHUB_OUTPUT
           echo "targets=$targets" >> $GITHUB_OUTPUT

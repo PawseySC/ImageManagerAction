@@ -43,6 +43,10 @@ inputs:
     description: 'Type of file being uploaded (archive/sif) for output naming'
     required: false
     default: 'archive'
+  verbose_diagnostics:
+    description: 'Run heavy S3 connection & write-permission probe (slow). Keep off by default.'
+    required: false
+    default: 'false'
 outputs:
   rclone_loaded:
     description: 'Indicates if rclone module was loaded successfully'
@@ -195,6 +199,7 @@ runs:
         rclone config show
 
     - name: Debug S3 Connection and Permissions
+      if: inputs.verbose_diagnostics == 'true'
       shell: bash
       run: |
         set -euo pipefail
@@ -512,9 +517,10 @@ runs:
           
           # Get filename for verification
           filename=$(basename "$upload_file")
-          
-          # Verify upload
-          if rclone lsf pawsey0012:"$bucket/" | grep -q "^$filename$"; then
+
+          # Verify upload by querying the specific object — avoids a full bucket listing
+          # which is O(N) and races with concurrent uploads.
+          if rclone lsf pawsey0012:"$bucket/" --include "/$filename" --max-depth 1 | grep -q "^$filename$"; then
             file_size_human=$(ls -lh "$upload_file" | awk '{print $5}')
             echo "✓ File successfully uploaded to S3"
             echo "  [BUCKET]: $bucket"

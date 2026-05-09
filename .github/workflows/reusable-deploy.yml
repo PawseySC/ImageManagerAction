@@ -105,16 +105,23 @@ jobs:
           echo "Registry API: $registry_url"
           echo "API path: $api_path"
 
-          # Get manifest and extract digest
+          # Get manifest and extract digest. Refuse to write SHPC entry with a fake digest
+          # because downstream `shpc install` will then pin to a non-existent layer.
           echo "Fetching manifest for tag: ${VERSION}"
 
-          digest=$(curl -s -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-            "$registry_url/$api_path/manifests/${VERSION}" \
-            | jq -r '.config.digest // empty')
+          manifest_response=$(curl -fsS \
+            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+            "$registry_url/$api_path/manifests/${VERSION}") || {
+              echo "Error: Failed to fetch manifest from $registry_url/$api_path/manifests/${VERSION}"
+              exit 1
+            }
+
+          digest=$(echo "$manifest_response" | jq -r '.config.digest // empty')
 
           if [ -z "$digest" ] || [ "$digest" = "null" ]; then
-            echo "Warning: Could not get digest, using placeholder"
-            digest="sha256:placeholder_digest_for_${VERSION}"
+            echo "Error: Manifest fetched but '.config.digest' is missing or null"
+            echo "Response (truncated): ${manifest_response:0:500}"
+            exit 1
           fi
 
           echo "SHA256 digest: $digest"
@@ -182,17 +189,21 @@ jobs:
           echo "$container_yaml" > "$temp_file"
           echo "Container YAML written to temporary file: $temp_file"
 
-          # Switch to spack user to create registry entry
+          # Switch to spack user to create registry entry. Use bash -s so the heredoc body
+          # runs through a fresh shell with `set -euo pipefail` actually honored, and the
+          # outer step inherits the exit status.
           echo "Switching to spack user to write to registry..."
-          sudo su - spack << EOF
+          sudo -u spack -H bash -s "$shpc_path" "$temp_file" <<'INNER_EOF'
           set -euo pipefail
-          echo "Now running as spack user"
-          mkdir -p '$shpc_path'
-          cp '$temp_file' '$shpc_path/container.yaml'
-          echo '✓ SHPC registry entry created successfully'
-          ls -la '$shpc_path/'
-          cat '$shpc_path/container.yaml'
-          EOF
+          shpc_path="$1"
+          temp_file="$2"
+          echo "Now running as spack user: $(id -un)"
+          mkdir -p "$shpc_path"
+          cp "$temp_file" "$shpc_path/container.yaml"
+          echo "✓ SHPC registry entry created successfully"
+          ls -la "$shpc_path/"
+          cat "$shpc_path/container.yaml"
+          INNER_EOF
 
           # Clean up temporary file
           rm -f "$temp_file"

@@ -323,7 +323,7 @@ jobs:
           |-----|--------|
           | PREPARE | ${{ inputs.result_prepare == 'success' && '✅ Success' || '❌ Failed' }} |
           | BUILD | ${{ inputs.result_build == 'success' && '✅ Success' || '❌ Failed' }} |
-          | SCAN-AND-REPORT | ${{ inputs.result_scan == 'success' && '✅ Success' || (inputs.result_scan == 'skipped' && '⏭️ Skipped (noscan=true)') || '❌ Failed' }} |
+          | SCAN-AND-REPORT | ${{ inputs.result_scan == 'success' && '✅ Success' || (inputs.result_scan == 'skipped' && '⏭️ Skipped (scan=false)') || '❌ Failed' }} |
           | PUSH-PRIV | ${{ inputs.result_push_priv == 'success' && '✅ Success' || '❌ Failed' }} |
           | PUSH-PUBLIC | ${{ inputs.result_push_public == 'success' && '✅ Success' || '❌ Failed' }} |
           | DEPLOY | ${{ inputs.result_deploy == 'success' && '✅ Success' || (inputs.result_deploy == 'skipped' && '⏭️ Skipped') || '❌ Failed' }} |
