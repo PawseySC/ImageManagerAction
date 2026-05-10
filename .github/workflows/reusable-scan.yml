@@ -33,6 +33,7 @@ on:
 jobs:
   scan:
     runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 45
     strategy:
       matrix: ${{ fromJson(inputs.build_matrix) }}
       fail-fast: false

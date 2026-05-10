@@ -38,6 +38,7 @@ on:
 jobs:
   push_private:
     runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 30
     strategy:
       matrix: ${{ fromJson(inputs.build_matrix) }}
       fail-fast: false
@@ -108,58 +109,49 @@ jobs:
         echo " Setonix Registry Push Process"
         echo "=========================================="
 
-        # Load image from archive first
+        # Retry helper: $1=attempts, $2=delay_seconds, rest=command
+        retry() {
+          local attempts="$1"; local delay="$2"; shift 2
+          local n=1
+          until "$@"; do
+            if [ "$n" -ge "$attempts" ]; then
+              echo "✗ Command failed after $n attempts: $*"
+              return 1
+            fi
+            echo "↻ Attempt $n failed; retrying in ${delay}s…"
+            sleep "$delay"
+            n=$((n+1))
+            delay=$((delay*2))
+          done
+        }
+
         echo "📦 Loading image from archive..."
         archive_file="${{ steps.locate_archive.outputs.archive_name }}"
-        if podman load -i "$archive_file"; then
-          echo "✓ Image loaded successfully from archive"
-        else
-          echo "✗ Failed to load image from archive"
-          exit 1
-        fi
+        podman load -i "$archive_file" || { echo "✗ Failed to load image from archive"; exit 1; }
+        echo "✓ Image loaded"
 
-        # Login to Setonix Registry
         echo "🔐 Logging into Setonix Registry..."
-        if podman login https://setonix-registry.pawsey.org.au -u "${{ vars.SETONIXREG_USERNAME }}" -p "${{ secrets.SETONIXREG_PASS }}"; then
-          echo "✓ Setonix Registry login successful"
-        else
-          echo "✗ Setonix Registry login failed"
-          exit 1
-        fi
+        retry 3 5 podman login https://setonix-registry.pawsey.org.au \
+          -u "${{ vars.SETONIXREG_USERNAME }}" -p "${{ secrets.SETONIXREG_PASS }}" \
+          || { echo "✗ Setonix Registry login failed"; exit 1; }
 
-        # Get private targets from manifest and use the first one as username
         private_targets='${{ inputs.private_targets }}'
         private_username=$(echo "$private_targets" | jq -r '.[0] // empty')
-
         if [ -z "$private_username" ] || [ "$private_username" = "null" ]; then
-          echo "Error: No private targets found in manifest"
-          exit 1
+          echo "Error: No private targets found in manifest"; exit 1
         fi
 
-        # Tag and push (IMAGE_NAME already includes variant suffix from BUILD-job)
         image_tag="${IMAGE_NAME}:${VERSION}"
         setonix_tag="setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}"
+        echo "🏷️  Tagging $image_tag → $setonix_tag"
+        podman tag "$image_tag" "$setonix_tag" || { echo "✗ Image tagging failed"; exit 1; }
 
-        echo ""
-        echo "🏷️  Tagging image for Setonix Registry:"
-        echo "   Source: $image_tag"
-        echo "   Target: $setonix_tag"
-
-        if podman tag "$image_tag" "$setonix_tag"; then
-          echo "✓ Image tagged successfully"
-        else
-          echo "✗ Image tagging failed"
-          exit 1
-        fi
-
-        echo ""
-        echo "📤 Pushing to Setonix Registry..."
-        if podman push "$setonix_tag"; then
-          echo "✅ Successfully pushed to Setonix Registry: $setonix_tag"
-        else
-          echo "❌ Failed to push to Setonix Registry"
-          exit 1
-        fi
+        echo "📤 Pushing to Setonix Registry (with retry on transient failure)…"
+        # 4 attempts, exponential backoff 10s/20s/40s. Covers brief network blips
+        # and registry-side throttles without papering over real failures.
+        retry 4 10 podman push "$setonix_tag" \
+          || { echo "❌ Failed to push to Setonix Registry"; exit 1; }
+        echo "✅ Pushed: $setonix_tag"
 
         # Cleanup local tagged image
         echo ""

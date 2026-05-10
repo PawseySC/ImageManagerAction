@@ -46,6 +46,7 @@ on:
 jobs:
   push_public:
     runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 30
     strategy:
       matrix: ${{ fromJson(inputs.build_matrix) }}
       fail-fast: false
@@ -166,52 +167,50 @@ jobs:
         echo " Quay.io Push Process"
         echo "=========================================="
 
-        # Login to Quay.io
-        echo "🔐 Logging into Quay.io..."
-        if podman login quay.io -u "${{ vars.QUAYIO_USERNAME }}" -p "${{ secrets.QUAYIO_TOKEN }}"; then
-          echo "✓ Quay.io login successful"
-        else
-          echo "✗ Quay.io login failed"
-          exit 1
-        fi
+        retry() {
+          local attempts="$1"; local delay="$2"; shift 2
+          local n=1
+          until "$@"; do
+            if [ "$n" -ge "$attempts" ]; then
+              echo "✗ Command failed after $n attempts: $*"
+              return 1
+            fi
+            echo "↻ Attempt $n failed; retrying in ${delay}s…"
+            sleep "$delay"
+            n=$((n+1))
+            delay=$((delay*2))
+          done
+        }
 
-        # Tag and push (IMAGE_NAME already includes variant suffix from BUILD-job)
+        echo "🔐 Logging into Quay.io..."
+        retry 3 5 podman login quay.io \
+          -u "${{ vars.QUAYIO_USERNAME }}" -p "${{ secrets.QUAYIO_TOKEN }}" \
+          || { echo "✗ Quay.io login failed"; exit 1; }
+
         image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
         quayio_tag="quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
+        echo "🏷️  Tagging $image_tag → $quayio_tag"
+        podman tag "$image_tag" "$quayio_tag" || { echo "✗ Image tagging failed"; exit 1; }
 
-        echo ""
-        echo "🏷️  Tagging image for Quay.io:"
-        echo "   Source: $image_tag"
-        echo "   Target: $quayio_tag"
+        echo "📤 Pushing to Quay.io (with retry)…"
+        retry 4 10 podman push "$quayio_tag" \
+          || { echo "❌ Failed to push to Quay.io"; exit 1; }
+        echo "✅ Pushed: $quayio_tag"
 
-        if podman tag "$image_tag" "$quayio_tag"; then
-          echo "✓ Image tagged successfully"
+        # Ensure repository is public so SHPC can pull. Soft-fail: not part of the
+        # contract and the registry sometimes returns transient 5xx here.
+        echo "Setting repository visibility to public..."
+        visibility_response=$(curl -fsS -X POST \
+          -H "Authorization: Bearer ${{ secrets.QUAYIO_TOKEN }}" \
+          -H "Content-Type: application/json" \
+          -d '{"visibility": "public"}' \
+          "https://quay.io/api/v1/repository/pawsey/${IMAGE_NAME}/changevisibility" 2>/dev/null) \
+          || visibility_response=""
+
+        if echo "$visibility_response" | jq -e '.success' >/dev/null 2>&1; then
+          echo "✓ Repository visibility set to public"
         else
-          echo "✗ Image tagging failed"
-          exit 1
-        fi
-
-        echo ""
-        echo "📤 Pushing to Quay.io..."
-        if podman push "$quayio_tag"; then
-          echo "✅ Successfully pushed to Quay.io: $quayio_tag"
-
-          # Ensure repository is set to public for SHPC deployment
-          echo "Setting repository visibility to public..."
-          visibility_response=$(curl -s -X POST \
-            -H "Authorization: Bearer ${{ secrets.QUAYIO_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{"visibility": "public"}' \
-            "https://quay.io/api/v1/repository/pawsey/${IMAGE_NAME}/changevisibility")
-
-          if echo "$visibility_response" | jq -e '.success' > /dev/null 2>&1; then
-            echo "✓ Repository visibility set to public"
-          else
-            echo "ℹ️  Repository visibility API call completed (status unknown)"
-          fi
-        else
-          echo "❌ Failed to push to Quay.io"
-          exit 1
+          echo "ℹ️  Repository visibility API call completed (status unknown)"
         fi
 
     # ============================================
@@ -227,39 +226,35 @@ jobs:
         echo " Setonix Public Registry Push Process"
         echo "=========================================="
 
-        # Login to Setonix Registry
-        echo "🔐 Logging into Setonix Registry..."
-        if podman login https://setonix-registry.pawsey.org.au -u "${{ vars.SETONIXREG_USERNAME }}" -p "${{ secrets.SETONIXREG_PASS }}"; then
-          echo "✓ Setonix Registry login successful"
-        else
-          echo "✗ Setonix Registry login failed"
-          exit 1
-        fi
+        retry() {
+          local attempts="$1"; local delay="$2"; shift 2
+          local n=1
+          until "$@"; do
+            if [ "$n" -ge "$attempts" ]; then
+              echo "✗ Command failed after $n attempts: $*"
+              return 1
+            fi
+            echo "↻ Attempt $n failed; retrying in ${delay}s…"
+            sleep "$delay"
+            n=$((n+1))
+            delay=$((delay*2))
+          done
+        }
 
-        # Tag and push to public channel (IMAGE_NAME already includes variant suffix from BUILD-job)
+        echo "🔐 Logging into Setonix Registry..."
+        retry 3 5 podman login https://setonix-registry.pawsey.org.au \
+          -u "${{ vars.SETONIXREG_USERNAME }}" -p "${{ secrets.SETONIXREG_PASS }}" \
+          || { echo "✗ Setonix Registry login failed"; exit 1; }
+
         image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
         setonix_public_tag="setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}"
+        echo "🏷️  Tagging $image_tag → $setonix_public_tag"
+        podman tag "$image_tag" "$setonix_public_tag" || { echo "✗ Image tagging failed"; exit 1; }
 
-        echo ""
-        echo "🏷️  Tagging image for Setonix Public Registry:"
-        echo "   Source: $image_tag"
-        echo "   Target: $setonix_public_tag"
-
-        if podman tag "$image_tag" "$setonix_public_tag"; then
-          echo "✓ Image tagged successfully"
-        else
-          echo "✗ Image tagging failed"
-          exit 1
-        fi
-
-        echo ""
-        echo "📤 Pushing to Setonix Public Registry..."
-        if podman push "$setonix_public_tag"; then
-          echo "✅ Successfully pushed to Setonix Public Registry: $setonix_public_tag"
-        else
-          echo "❌ Failed to push to Setonix Public Registry"
-          exit 1
-        fi
+        echo "📤 Pushing to Setonix Public Registry (with retry)…"
+        retry 4 10 podman push "$setonix_public_tag" \
+          || { echo "❌ Failed to push to Setonix Public Registry"; exit 1; }
+        echo "✅ Pushed: $setonix_public_tag"
 
     - name: Clean up podman images
       if: always() && (inputs.quayio_available == 'true' || inputs.setonixreg_available == 'true')

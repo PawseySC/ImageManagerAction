@@ -49,6 +49,9 @@ on:
 jobs:
   build:
     runs-on: ${{ inputs.runner_label }}
+    # Hard ceiling so a self-hosted runner that loses heartbeat or a hung
+    # podman build doesn't keep a slot pinned forever.
+    timeout-minutes: 90
     strategy:
       matrix: ${{ fromJson(inputs.build_matrix) }}
       fail-fast: false
@@ -267,16 +270,29 @@ jobs:
           EOF
           echo "✓ Configured Podman to allow short-name resolution"
 
-          # Advanced build with layer caching and parallel jobs support
-          # Note: Podman uses different caching mechanism than Docker BuildKit
-          podman build \
-            --format=docker \
-            --layers \
-            --pull=newer \
-            ${JOBS:+--jobs "$JOBS"} \
-            -f "$dockerfile_path" \
-            -t "$image_tag" \
-            "$branch_path"
+          # Build with retry. The actual `podman build` failures we've seen are
+          # almost all "could not pull base image" (registry blip) — recoverable.
+          # A real Dockerfile error fails identically every time, so retrying
+          # doesn't paper over compile bugs.
+          n=1
+          delay=15
+          until podman build \
+                  --format=docker \
+                  --layers \
+                  --pull=newer \
+                  ${JOBS:+--jobs "$JOBS"} \
+                  -f "$dockerfile_path" \
+                  -t "$image_tag" \
+                  "$branch_path"; do
+            if [ "$n" -ge 3 ]; then
+              echo "✗ podman build failed after $n attempts"
+              exit 1
+            fi
+            echo "↻ build attempt $n failed; retrying in ${delay}s…"
+            sleep "$delay"
+            n=$((n+1))
+            delay=$((delay*2))
+          done
 
           # Verify the image was built
           if podman images | grep -q "${image_name}"; then

@@ -9,7 +9,12 @@ on:
     branches:
       - 'cicd-*'
       - 'cicd-*/**'
-      - 'cicd-**'
+
+# Serialize runs per cicd branch. A second push for the same main/feature
+# cancels the in-flight one rather than racing on the registry / runner cache.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
