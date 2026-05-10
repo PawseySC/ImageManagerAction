@@ -50,11 +50,17 @@ jobs:
     strategy:
       matrix: ${{ fromJson(inputs.build_matrix) }}
       fail-fast: false
-    # Environment selection based on devmode flag and targets:
-    # - If devmode=true OR targets is empty: Use 'devmode_skip_approval' environment (no manual approval required)
-    # - If devmode=false AND targets has values: Use 'manual_approval' environment (requires manual approval)
+    # Public-registry pushes ALWAYS require the `manual_approval` environment.
+    # Previously this was selectable via attacker-controlled `devmode` /
+    # `targets` form fields; setting `devmode=true` bypassed the gate. The
+    # decision of whether a push needs human review must not be derived from
+    # data the uploader controls.
+    #
+    # If you want a fast lane for trusted users, gate it on a workflow input
+    # that's bound to a server-only signal (a deploy-key-only tag, a label
+    # set by an authenticated admin endpoint, etc.) — never the manifest.
     environment:
-      name: ${{ (inputs.devmode == 'true' || inputs.targets == '[]') && 'devmode_skip_approval' || 'manual_approval' }}
+      name: manual_approval
     env:
       VERSION: ${{ inputs.version }}
       TARGETS: ${{ inputs.targets }}
@@ -197,21 +203,12 @@ jobs:
           || { echo "❌ Failed to push to Quay.io"; exit 1; }
         echo "✅ Pushed: $quayio_tag"
 
-        # Ensure repository is public so SHPC can pull. Soft-fail: not part of the
-        # contract and the registry sometimes returns transient 5xx here.
-        echo "Setting repository visibility to public..."
-        visibility_response=$(curl -fsS -X POST \
-          -H "Authorization: Bearer ${{ secrets.QUAYIO_TOKEN }}" \
-          -H "Content-Type: application/json" \
-          -d '{"visibility": "public"}' \
-          "https://quay.io/api/v1/repository/pawsey/${IMAGE_NAME}/changevisibility" 2>/dev/null) \
-          || visibility_response=""
-
-        if echo "$visibility_response" | jq -e '.success' >/dev/null 2>&1; then
-          echo "✓ Repository visibility set to public"
-        else
-          echo "ℹ️  Repository visibility API call completed (status unknown)"
-        fi
+        # Repository visibility is intentionally NOT auto-flipped to public
+        # here. Previously every successful push called `changevisibility`,
+        # which let an unauth uploader force any pawsey/* repo public on
+        # first push. Visibility for new repos must be set out-of-band by
+        # an org admin or a separate, server-trusted job.
+        echo "Skipping automatic visibility flip (manual / admin-only)."
 
     # ============================================
     # Setonix Public Registry Push (Only if in targets)

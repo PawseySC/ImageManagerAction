@@ -103,6 +103,10 @@ jobs:
 
     - name: Push to Setonix private registry
       if: inputs.setonixreg_available == 'true'
+      env:
+        # Pass through env so the `'` / `$` / `"` in attacker-influenced
+        # input never reach a shell literal via expression interpolation.
+        PRIVATE_TARGETS_JSON: ${{ inputs.private_targets }}
       run: |
         set -euo pipefail
         echo "=========================================="
@@ -135,8 +139,11 @@ jobs:
           -u "${{ vars.SETONIXREG_USERNAME }}" -p "${{ secrets.SETONIXREG_PASS }}" \
           || { echo "✗ Setonix Registry login failed"; exit 1; }
 
-        private_targets='${{ inputs.private_targets }}'
-        private_username=$(echo "$private_targets" | jq -r '.[0] // empty')
+        # Defense-in-depth: pass attacker-influenced JSON through env, not
+        # inline expression interpolation. Even if the upstream validator
+        # ever regresses, a `'` in the value can no longer break out of a
+        # rendered shell literal here — bash sees a single env-var read.
+        private_username=$(printf '%s' "$PRIVATE_TARGETS_JSON" | jq -r '.[0] // empty')
         if [ -z "$private_username" ] || [ "$private_username" = "null" ]; then
           echo "Error: No private targets found in manifest"; exit 1
         fi

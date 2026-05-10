@@ -102,31 +102,38 @@ jobs:
 
       - name: Apply template values to Dockerfile
         if: inputs.has_template == 'true'
+        env:
+          # Defense-in-depth: pass via env, not inline expression. Even if
+          # the upstream validator regressed and a `'` slipped through, bash
+          # would just see a value here — not a shell-literal break.
+          TEMPLATE_VALUES_JSON: ${{ toJson(matrix.values) }}
+          DOCKERFILE_PATH: ${{ inputs.dockerfile_path }}
         run: |
           set -euo pipefail
 
-          dockerfile="${{ inputs.dockerfile_path }}"
-          template_values='${{ toJson(matrix.values) }}'
+          echo "Processing Dockerfile: $DOCKERFILE_PATH"
+          echo "Template values: $TEMPLATE_VALUES_JSON"
+          cp "$DOCKERFILE_PATH" "$DOCKERFILE_PATH.original"
 
-          echo "Processing Dockerfile: $dockerfile"
-          echo "Template values: $template_values"
-
-          # Create a backup of original Dockerfile
-          cp "$dockerfile" "$dockerfile.original"
-
-          # Parse template values and modify ARG lines in Dockerfile
-          echo "$template_values" | jq -r 'to_entries[] | "\(.key)=\(.value)"' | while IFS='=' read -r arg_name arg_value; do
+          # Parse and rewrite ARG lines. Both name and value go through a
+          # strict char allowlist (matches the backend validator). Anything
+          # the allowlist rejects fails the build immediately.
+          while IFS=$'\t' read -r arg_name arg_value; do
+            [ -z "$arg_name" ] && continue
+            if ! [[ "$arg_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+              echo "Refusing to substitute non-identifier ARG name: $arg_name"; exit 1
+            fi
+            if ! [[ "$arg_value" =~ ^[A-Za-z0-9._+:/=,-]+$ ]]; then
+              echo "Refusing unsafe ARG value for $arg_name"; exit 1
+            fi
             echo "Replacing ARG $arg_name with value: $arg_value"
+            sed -i "s#^ARG ${arg_name}=.*#ARG ${arg_name}=${arg_value}#g" "$DOCKERFILE_PATH"
+          done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$TEMPLATE_VALUES_JSON")
 
-            # Use sed to replace ARG lines
-            # Pattern: ARG <name>=<any_value> -> ARG <name>=<new_value>
-            sed -i "s|^ARG ${arg_name}=.*|ARG ${arg_name}=${arg_value}|g" "$dockerfile"
-          done
-
-          echo "✓ Dockerfile modifications completed"
+          echo "Dockerfile modifications completed"
           echo ""
           echo "=== Modified ARG lines ==="
-          grep "^ARG" "$dockerfile" || echo "No ARG lines found"
+          grep "^ARG" "$DOCKERFILE_PATH" || echo "No ARG lines found"
           echo "=========================="
 
       - name: Configure podman environment
