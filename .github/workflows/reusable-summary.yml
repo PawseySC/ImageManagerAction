@@ -380,6 +380,17 @@ jobs:
 
           echo "✅ Summary rendered and published"
 
+      # Pull the per-variant trivy-reports-* artifacts (each carries a
+      # scan-counts.json) so the summary.json below can aggregate vuln counts.
+      # Best-effort: no artifacts when scan was skipped -> continue.
+      - name: Download scan reports
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: trivy-reports-*
+          path: /tmp/scan-artifacts
+
       # ---- Machine-readable summary for the ImageManagerWeb frontend --------
       # The rendered $GITHUB_STEP_SUMMARY above is NOT available via the REST API,
       # so we also emit a structured summary.json artifact that the web backend
@@ -463,6 +474,22 @@ jobs:
             variants=$(echo "$variants" | jq --argjson v "$v" '. + [$v]')
           done <<< "$IMAGE_NAMES"
 
+          # Aggregate Trivy vuln counts across the per-variant scan-counts.json
+          # files pulled by the Download scan reports step (null if scan skipped).
+          SCAN_JSON=null
+          if ls /tmp/scan-artifacts/*/scan-counts.json >/dev/null 2>&1; then
+            SCAN_JSON=$(jq -s '{
+              available: true,
+              scanned_variants: length,
+              critical: (map(.counts.CRITICAL // 0) | add),
+              high:     (map(.counts.HIGH // 0)     | add),
+              medium:   (map(.counts.MEDIUM // 0)   | add),
+              low:      (map(.counts.LOW // 0)      | add),
+              unknown:  (map(.counts.UNKNOWN // 0)  | add),
+              total:    (map(.total // 0)           | add)
+            }' /tmp/scan-artifacts/*/scan-counts.json 2>/dev/null || echo null)
+          fi
+
           jq -n \
             --arg main "$MAIN" --arg feature "$FEATURE" --arg version "$VERSION" \
             --arg platform "$PLATFORM" --arg branch "$BRANCH" \
@@ -474,6 +501,7 @@ jobs:
             --arg rp "$RESULT_PREPARE" --arg rb "$RESULT_BUILD" --arg rs "$RESULT_SCAN" \
             --arg rpp "$RESULT_PUSH_PRIV" --arg rpub "$RESULT_PUSH_PUBLIC" --arg rd "$RESULT_DEPLOY" \
             --argjson variants "$variants" \
+            --argjson scan "$SCAN_JSON" \
             '{
               schema: 1,
               main: $main, feature: $feature, version: $version, platform: $platform,
@@ -484,6 +512,7 @@ jobs:
               registries_available: {quayio: ($quay_avail == "true"), setonix: ($setonix_avail == "true")},
               buckets: {docker: $dbucket, sif: $sbucket},
               results: {prepare:$rp, build:$rb, scan:$rs, push_priv:$rpp, push_public:$rpub, deploy:$rd},
+              scan: $scan,
               variants: $variants
             }' > summary.json
 
