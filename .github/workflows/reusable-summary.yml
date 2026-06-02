@@ -379,3 +379,121 @@ jobs:
           cat /tmp/summary_final.md >> $GITHUB_STEP_SUMMARY
 
           echo "✅ Summary rendered and published"
+
+      # ---- Machine-readable summary for the ImageManagerWeb frontend --------
+      # The rendered $GITHUB_STEP_SUMMARY above is NOT available via the REST API,
+      # so we also emit a structured summary.json artifact that the web backend
+      # downloads and parses (exact S3 URIs + per-registry image refs + results).
+      - name: Generate machine-readable summary.json
+        if: always()
+        env:
+          TARGETS: ${{ inputs.targets }}
+          PRIVATE_TARGETS: ${{ inputs.private_targets }}
+          BUILD_MATRIX: ${{ inputs.build_matrix }}
+          ACACIA_BUCKET: ${{ inputs.acacia_bucket }}
+          ACACIA_SIF_BUCKET: ${{ inputs.acacia_sif_bucket }}
+          QUAYIO_AVAILABLE: ${{ inputs.quayio_available }}
+          SETONIXREG_AVAILABLE: ${{ inputs.setonixreg_available }}
+          RESULT_PREPARE: ${{ inputs.result_prepare }}
+          RESULT_BUILD: ${{ inputs.result_build }}
+          RESULT_SCAN: ${{ inputs.result_scan }}
+          RESULT_PUSH_PRIV: ${{ inputs.result_push_priv }}
+          RESULT_PUSH_PUBLIC: ${{ inputs.result_push_public }}
+          RESULT_DEPLOY: ${{ inputs.result_deploy }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          IMAGE_NAME="${MAIN}-${FEATURE}"
+          TS=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+          # Sanitize JSON-typed inputs (fall back to safe defaults if malformed).
+          echo "$TARGETS"         | jq . >/dev/null 2>&1 || TARGETS='[]'
+          echo "$PRIVATE_TARGETS" | jq . >/dev/null 2>&1 || PRIVATE_TARGETS='[]'
+          echo "$BUILD_MATRIX"    | jq . >/dev/null 2>&1 || BUILD_MATRIX='{"include":[]}'
+          PRIVATE_USER=$(echo "$PRIVATE_TARGETS" | jq -r '.[0] // "unknown"')
+
+          # The list of image names: from the matrix for multi-variant, else MAIN-FEATURE.
+          if [ "$HAS_TEMPLATE" = "true" ]; then
+            # // empty drops missing/null image_name entries so the fallback below fires
+            IMAGE_NAMES=$(echo "$BUILD_MATRIX" | jq -r '.include[].image_name // empty' 2>/dev/null)
+          fi
+          if [ -z "${IMAGE_NAMES:-}" ]; then IMAGE_NAMES="$IMAGE_NAME"; fi
+
+          # Per-registry result (mirrors the markdown registry block logic).
+          quay_in=no;  echo "$TARGETS" | jq -e 'contains(["quay.io"])'         >/dev/null 2>&1 && quay_in=yes
+          setpub_in=no; echo "$TARGETS" | jq -e 'contains(["setonix-registry"])' >/dev/null 2>&1 && setpub_in=yes
+
+          priv_result="skipped"
+          if [ "$SETONIXREG_AVAILABLE" = "true" ] && [ "$RESULT_PUSH_PRIV" = "success" ]; then priv_result="success"
+          elif [ "$SETONIXREG_AVAILABLE" = "true" ]; then priv_result="failed"; fi
+
+          quay_result="not_in_targets"
+          if [ "$quay_in" = "yes" ]; then
+            if [ "$QUAYIO_AVAILABLE" = "true" ] && [ "$RESULT_PUSH_PUBLIC" = "success" ]; then quay_result="success"
+            elif [ "$QUAYIO_AVAILABLE" = "true" ]; then quay_result="failed"; else quay_result="skipped"; fi
+          fi
+
+          setpub_result="not_in_targets"
+          if [ "$setpub_in" = "yes" ]; then
+            if [ "$SETONIXREG_AVAILABLE" = "true" ] && [ "$RESULT_PUSH_PUBLIC" = "success" ]; then setpub_result="success"
+            elif [ "$SETONIXREG_AVAILABLE" = "true" ]; then setpub_result="failed"; else setpub_result="skipped"; fi
+          fi
+
+          variants='[]'
+          while read -r img; do
+            [ -z "$img" ] && continue
+            v=$(jq -n \
+              --arg img "$img" --arg ver "$VERSION" \
+              --arg dbucket "$ACACIA_BUCKET" --arg sbucket "$ACACIA_SIF_BUCKET" \
+              --arg puser "$PRIVATE_USER" \
+              --arg priv "$priv_result" --arg quay "$quay_result" --arg setpub "$setpub_result" \
+              '{
+                image_name: $img,
+                archives: {
+                  tar: ("s3://" + $dbucket + "/" + $img + "_" + $ver + ".tar"),
+                  sif: ("s3://" + $sbucket + "/" + $img + "_" + $ver + ".sif")
+                },
+                images: [
+                  {registry:"Setonix (private)", ref:("setonix-registry.pawsey.org.au/" + $puser + "/" + $img + ":" + $ver), result:$priv},
+                  {registry:"Quay.io",           ref:("quay.io/pawsey/" + $img + ":" + $ver),                                result:$quay},
+                  {registry:"Setonix (public)",  ref:("setonix-registry.pawsey.org.au/pawsey/" + $img + ":" + $ver),         result:$setpub}
+                ]
+              }')
+            variants=$(echo "$variants" | jq --argjson v "$v" '. + [$v]')
+          done <<< "$IMAGE_NAMES"
+
+          jq -n \
+            --arg main "$MAIN" --arg feature "$FEATURE" --arg version "$VERSION" \
+            --arg platform "$PLATFORM" --arg branch "$BRANCH" \
+            --arg corr "$CORRELATION_ID" --arg ts "$TS" --arg runid "$RUN_ID" \
+            --arg has_template "$HAS_TEMPLATE" --arg vcount "$VARIANT_COUNT" \
+            --argjson targets "$TARGETS" \
+            --arg dbucket "$ACACIA_BUCKET" --arg sbucket "$ACACIA_SIF_BUCKET" \
+            --arg quay_avail "$QUAYIO_AVAILABLE" --arg setonix_avail "$SETONIXREG_AVAILABLE" \
+            --arg rp "$RESULT_PREPARE" --arg rb "$RESULT_BUILD" --arg rs "$RESULT_SCAN" \
+            --arg rpp "$RESULT_PUSH_PRIV" --arg rpub "$RESULT_PUSH_PUBLIC" --arg rd "$RESULT_DEPLOY" \
+            --argjson variants "$variants" \
+            '{
+              schema: 1,
+              main: $main, feature: $feature, version: $version, platform: $platform,
+              branch: $branch, correlation_id: $corr, run_id: $runid, generated_at: $ts,
+              has_template: ($has_template == "true"),
+              variant_count: ($vcount | tonumber? // 0),
+              targets: $targets,
+              registries_available: {quayio: ($quay_avail == "true"), setonix: ($setonix_avail == "true")},
+              buckets: {docker: $dbucket, sif: $sbucket},
+              results: {prepare:$rp, build:$rb, scan:$rs, push_priv:$rpp, push_public:$rpub, deploy:$rd},
+              variants: $variants
+            }' > summary.json
+
+          echo "--- summary.json ---"; cat summary.json
+
+      - name: Upload summary.json artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-manager-summary
+          path: summary.json
+          retention-days: 30
+          if-no-files-found: warn
