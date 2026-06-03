@@ -106,23 +106,23 @@ jobs:
           IMAGE_NAME="${MAIN}-${FEATURE}"
 
           if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
-            cat > /tmp/archive_block.txt <<'BLOCK_EOF'
-          > **Note:** This build produced ${{ env.VARIANT_COUNT }} variant(s). Each variant has separate Docker archive and SIF files.
-
-          **Docker Archives** (`s3://${{ inputs.acacia_bucket }}/`):
-          BLOCK_EOF
-
-            # Use pre-computed image_name from matrix
-            matrix_json='${{ inputs.build_matrix }}'
-            while read image_name; do
-              echo "- \`${image_name}_${VERSION}.tar\`" >> /tmp/archive_block.txt
-            done < <(echo "$matrix_json" | jq -r '.include[].image_name')
-
-            echo "" >> /tmp/archive_block.txt
-            echo "**Singularity SIF Files** (\`s3://${{ inputs.acacia_sif_bucket }}/\`):" >> /tmp/archive_block.txt
-            while read image_name; do
-              echo "- \`${image_name}_${VERSION}.sif\`" >> /tmp/archive_block.txt
-            done < <(echo "$matrix_json" | jq -r '.include[].image_name')
+            # Only claim archives were uploaded if BUILD actually succeeded.
+            if [ "${{ inputs.result_build }}" = "success" ]; then
+              matrix_json='${{ inputs.build_matrix }}'
+              echo "> **Note:** This build produced ${{ env.VARIANT_COUNT }} variant(s); each has a separate Docker archive and SIF file." > /tmp/archive_block.txt
+              echo "" >> /tmp/archive_block.txt
+              echo "**Docker Archives** (\`s3://${{ inputs.acacia_bucket }}/\`) — ✅ uploaded:" >> /tmp/archive_block.txt
+              while read image_name; do
+                echo "- \`${image_name}_${VERSION}.tar\`" >> /tmp/archive_block.txt
+              done < <(echo "$matrix_json" | jq -r '.include[].image_name')
+              echo "" >> /tmp/archive_block.txt
+              echo "**Singularity SIF Files** (\`s3://${{ inputs.acacia_sif_bucket }}/\`) — ✅ uploaded:" >> /tmp/archive_block.txt
+              while read image_name; do
+                echo "- \`${image_name}_${VERSION}.sif\`" >> /tmp/archive_block.txt
+              done < <(echo "$matrix_json" | jq -r '.include[].image_name')
+            else
+              echo "> ❌ **Build did not complete** (BUILD result: \`${{ inputs.result_build }}\`). No archives were uploaded to S3." > /tmp/archive_block.txt
+            fi
           else
             cat > /tmp/archive_block.txt <<EOF
           | Location | Address | Status |
@@ -150,44 +150,52 @@ jobs:
           IMAGE_NAME="${MAIN}-${FEATURE}"
 
           if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
-            cat > /tmp/registry_block.txt <<EOF
-          > **Note:** Each of the ${{ env.VARIANT_COUNT }} variant(s) has been pushed to the configured registries.
-
-          EOF
-
-            # Parse configured targets
             targets='${{ inputs.targets }}'
             private_targets='${{ inputs.private_targets }}'
             private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
             matrix_json='${{ inputs.build_matrix }}'
+            echo "> **Note:** ${{ env.VARIANT_COUNT }} variant(s); status shown per registry below." > /tmp/registry_block.txt
+            echo "" >> /tmp/registry_block.txt
 
-            # Setonix Private Registry
+            # Setonix Private Registry (attempted whenever credentials are available)
             if [ "${{ inputs.setonixreg_available }}" = "true" ]; then
-              echo "### Setonix Private Registry" >> /tmp/registry_block.txt
-              echo "" >> /tmp/registry_block.txt
-              while read image_name; do
-                echo "- \`setonix-registry.pawsey.org.au/${private_username}/${image_name}:${VERSION}\`" >> /tmp/registry_block.txt
-              done < <(echo "$matrix_json" | jq -r '.include[].image_name')
+              if [ "${{ inputs.result_push_priv }}" = "success" ]; then
+                echo "### Setonix Private Registry — ✅ pushed" >> /tmp/registry_block.txt
+                echo "" >> /tmp/registry_block.txt
+                while read image_name; do
+                  echo "- \`setonix-registry.pawsey.org.au/${private_username}/${image_name}:${VERSION}\`" >> /tmp/registry_block.txt
+                done < <(echo "$matrix_json" | jq -r '.include[].image_name')
+              else
+                echo "### Setonix Private Registry — ❌ not pushed (result: \`${{ inputs.result_push_priv }}\`)" >> /tmp/registry_block.txt
+              fi
               echo "" >> /tmp/registry_block.txt
             fi
 
-            # Quay.io
+            # Quay.io (only if in targets)
             if echo "$targets" | jq -e 'contains(["quay.io"])' > /dev/null 2>&1 && [ "${{ inputs.quayio_available }}" = "true" ]; then
-              echo "### Quay.io Public Registry" >> /tmp/registry_block.txt
-              echo "" >> /tmp/registry_block.txt
-              while read image_name; do
-                echo "- \`quay.io/pawsey/${image_name}:${VERSION}\`" >> /tmp/registry_block.txt
-              done < <(echo "$matrix_json" | jq -r '.include[].image_name')
+              if [ "${{ inputs.result_push_public }}" = "success" ]; then
+                echo "### Quay.io Public Registry — ✅ pushed" >> /tmp/registry_block.txt
+                echo "" >> /tmp/registry_block.txt
+                while read image_name; do
+                  echo "- \`quay.io/pawsey/${image_name}:${VERSION}\`" >> /tmp/registry_block.txt
+                done < <(echo "$matrix_json" | jq -r '.include[].image_name')
+              else
+                echo "### Quay.io Public Registry — ❌ not pushed (result: \`${{ inputs.result_push_public }}\`)" >> /tmp/registry_block.txt
+              fi
               echo "" >> /tmp/registry_block.txt
             fi
 
-            # Setonix Public
+            # Setonix Public (only if in targets)
             if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1 && [ "${{ inputs.setonixreg_available }}" = "true" ]; then
-              echo "### Setonix Public Registry" >> /tmp/registry_block.txt
-              echo "" >> /tmp/registry_block.txt
-              while read image_name; do
-                echo "- \`setonix-registry.pawsey.org.au/pawsey/${image_name}:${VERSION}\`" >> /tmp/registry_block.txt
-              done < <(echo "$matrix_json" | jq -r '.include[].image_name')
+              if [ "${{ inputs.result_push_public }}" = "success" ]; then
+                echo "### Setonix Public Registry — ✅ pushed" >> /tmp/registry_block.txt
+                echo "" >> /tmp/registry_block.txt
+                while read image_name; do
+                  echo "- \`setonix-registry.pawsey.org.au/pawsey/${image_name}:${VERSION}\`" >> /tmp/registry_block.txt
+                done < <(echo "$matrix_json" | jq -r '.include[].image_name')
+              else
+                echo "### Setonix Public Registry — ❌ not pushed (result: \`${{ inputs.result_push_public }}\`)" >> /tmp/registry_block.txt
+              fi
               echo "" >> /tmp/registry_block.txt
             fi
           else

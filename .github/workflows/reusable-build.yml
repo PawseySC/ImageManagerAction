@@ -255,15 +255,18 @@ jobs:
           echo "Variant suffix: ${VARIANT_SUFFIX}"
           echo "Final image tag: $image_tag"
 
-          # Set up cache tracking (Podman uses native layer caching)
-          IMAGE_CACHE_REF="${main}-${feature}:cache"
+          # Set up cache tracking (Podman uses native layer caching). Derive the
+          # cache key from branch_path (main/feature) — $main/$feature are not in
+          # this step's env, which previously made the key an empty "-".
+          CACHE_KEY=$(printf '%s' "$branch_path" | tr '/' '-')
+          IMAGE_CACHE_REF="${CACHE_KEY}:cache"
 
           # Check if we have previous builds for this main/feature combination
-          if [ -d "${REGISTRY_CACHE_DIR}/${main}-${feature}" ]; then
-            echo "✓ Found existing build cache directory for ${main}-${feature}"
+          if [ -d "${REGISTRY_CACHE_DIR}/${CACHE_KEY}" ]; then
+            echo "✓ Found existing build cache directory for ${CACHE_KEY}"
             echo "✓ Podman will reuse layers from previous builds automatically"
           else
-            echo "ℹ️ First build for ${main}-${feature}, creating cache tracking"
+            echo "ℹ️ First build for ${CACHE_KEY}, creating cache tracking"
           fi
 
           echo "Building container with podman (optimized)..."
@@ -318,8 +321,8 @@ jobs:
             echo "[FORMAT]: Docker-compatible image format"
 
             # Create cache tracking for next builds
-            mkdir -p "${REGISTRY_CACHE_DIR}/${main}-${feature}"
-            echo "$(date): Built ${image_tag} with cache ref ${IMAGE_CACHE_REF}" >> "${REGISTRY_CACHE_DIR}/${main}-${feature}/build.log"
+            mkdir -p "${REGISTRY_CACHE_DIR}/${CACHE_KEY}"
+            echo "$(date): Built ${image_tag} with cache ref ${IMAGE_CACHE_REF}" >> "${REGISTRY_CACHE_DIR}/${CACHE_KEY}/build.log"
 
             # Show all images to see layer reuse
             echo "[ALL IMAGES]:"
