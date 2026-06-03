@@ -60,7 +60,7 @@ jobs:
       image_name: ${{ steps.build_container.outputs.image_name }}
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 

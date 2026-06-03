@@ -209,7 +209,7 @@ jobs:
           echo "==================================="
 
       - name: Checkout source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1  # Only need current commit for manifest-based workflow
 

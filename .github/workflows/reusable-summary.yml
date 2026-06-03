@@ -80,7 +80,7 @@ jobs:
       HAS_TEMPLATE: ${{ inputs.has_template }}
     steps:
       - name: Checkout for template access
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
@@ -394,7 +394,7 @@ jobs:
       - name: Download scan reports
         if: always()
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: trivy-reports-*
           path: /tmp/scan-artifacts
@@ -530,7 +530,7 @@ jobs:
 
       - name: Upload summary.json artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: image-manager-summary
           path: summary.json
