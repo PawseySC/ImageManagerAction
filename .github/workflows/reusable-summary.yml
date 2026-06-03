@@ -466,12 +466,14 @@ jobs:
               --arg img "$img" --arg ver "$VERSION" \
               --arg dbucket "$ACACIA_BUCKET" --arg sbucket "$ACACIA_SIF_BUCKET" \
               --arg puser "$PRIVATE_USER" \
+              --arg rb "$RESULT_BUILD" \
               --arg priv "$priv_result" --arg quay "$quay_result" --arg setpub "$setpub_result" \
               '{
                 image_name: $img,
                 archives: {
                   tar: ("s3://" + $dbucket + "/" + $img + "_" + $ver + ".tar"),
-                  sif: ("s3://" + $sbucket + "/" + $img + "_" + $ver + ".sif")
+                  sif: ("s3://" + $sbucket + "/" + $img + "_" + $ver + ".sif"),
+                  uploaded: ($rb == "success")
                 },
                 images: [
                   {registry:"Setonix (private)", ref:("setonix-registry.pawsey.org.au/" + $puser + "/" + $img + ":" + $ver), result:$priv},
