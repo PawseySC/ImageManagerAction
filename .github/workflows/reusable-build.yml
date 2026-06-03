@@ -48,7 +48,7 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ inputs.runner_label }}
+    runs-on: ${{ fromJSON(inputs.runner_label) }}
     # Hard ceiling so a self-hosted runner that loses heartbeat or a hung
     # podman build doesn't keep a slot pinned forever.
     timeout-minutes: 90
@@ -142,9 +142,13 @@ jobs:
           echo "Setting up container environment variables..."
 
           # Export environment variables
-          export XDG_DATA_HOME=/container/${USER}/data
-          export XDG_RUNTIME_DIR=/container/${USER}/runtime
-          export TMPDIR=/container/${USER}/tmp/
+          # Per-runner isolation so multiple runners (even on one machine) never
+          # share a rootless-podman store. RID = stable fs-safe hash of the runner name.
+          RID=$(printf '%s' "${RUNNER_NAME:-default}" | sha1sum | cut -c1-12)
+          echo "RID=${RID}" >> $GITHUB_ENV
+          export XDG_DATA_HOME=/container/${USER}/data-${RID}
+          export XDG_RUNTIME_DIR=/container/${USER}/runtime-${RID}
+          export TMPDIR=/container/${USER}/tmp-${RID}/
 
           # Create required directories
           mkdir -p ${XDG_DATA_HOME}
@@ -200,7 +204,7 @@ jobs:
         id: setup_cache
         run: |
           # Setup podman cache directory
-          CACHE_DIR="/container/${USER}/podman-cache"
+          CACHE_DIR="/container/${USER}/podman-cache-${RID}"
           mkdir -p "$CACHE_DIR"
 
           # Create cache subdirectories for different cache types

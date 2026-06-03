@@ -36,7 +36,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: ${{ inputs.runner_label }}
+    runs-on: ${{ fromJSON(inputs.runner_label) }}
     timeout-minutes: 20
     strategy:
       matrix: ${{ fromJson(inputs.build_matrix) }}

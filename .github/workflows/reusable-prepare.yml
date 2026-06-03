@@ -110,7 +110,7 @@ jobs:
       - name: Initialize runner configuration
         id: set_default_runner_label
         run: |
-          echo "runner_label=ubuntu-latest" >> $GITHUB_OUTPUT
+          echo 'runner_label=["ubuntu-latest"]' >> $GITHUB_OUTPUT
 
       - name: Validate environment credentials
         id: check_vars_secrets
@@ -406,9 +406,9 @@ jobs:
         run: |
           platform="${{ steps.validate_manifest.outputs.platform }}"
           if [ "$platform" = "arm" ]; then
-            echo "runner_label=ella-n003" >> $GITHUB_OUTPUT
+            echo 'runner_label=["ella-n003"]' >> $GITHUB_OUTPUT
           else
-            echo "runner_label=setonix-podman02" >> $GITHUB_OUTPUT
+            echo 'runner_label=["self-hosted","X64"]' >> $GITHUB_OUTPUT
           fi
           echo "Selected runner: $([ "$platform" = "arm" ] && echo "ella-n003" || echo "setonix-podman02") for platform: $platform"
 

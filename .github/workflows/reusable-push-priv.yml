@@ -37,7 +37,7 @@ on:
 
 jobs:
   push_private:
-    runs-on: ${{ inputs.runner_label }}
+    runs-on: ${{ fromJSON(inputs.runner_label) }}
     timeout-minutes: 30
     strategy:
       matrix: ${{ fromJson(inputs.build_matrix) }}
@@ -68,9 +68,13 @@ jobs:
         echo "Setting up container environment variables for push..."
 
         # Export environment variables (same as BUILD-job)
-        export XDG_DATA_HOME=/container/${USER}/data
-        export XDG_RUNTIME_DIR=/container/${USER}/runtime
-        export TMPDIR=/container/${USER}/tmp/
+        # Per-runner isolation so multiple runners (even on one machine) never
+        # share a rootless-podman store. RID = stable fs-safe hash of the runner name.
+        RID=$(printf '%s' "${RUNNER_NAME:-default}" | sha1sum | cut -c1-12)
+        echo "RID=${RID}" >> $GITHUB_ENV
+        export XDG_DATA_HOME=/container/${USER}/data-${RID}
+        export XDG_RUNTIME_DIR=/container/${USER}/runtime-${RID}
+        export TMPDIR=/container/${USER}/tmp-${RID}/
 
         # Create required directories
         mkdir -p ${XDG_DATA_HOME}
