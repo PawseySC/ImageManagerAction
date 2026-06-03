@@ -74,7 +74,18 @@ jobs:
 
   PUSH_PUBLIC:
     needs: [PREPARE, BUILD, PUSH_PRIV]
-    if: needs.PREPARE.outputs.proceed_valid == 'true'
+    # Only schedule this job — and therefore only trigger the manual_approval
+    # environment gate — when a PUBLIC registry is actually selected AND its
+    # credentials are available. The environment approval is requested before any
+    # step runs, so without this gate an empty `targets` (devmode / private-only
+    # builds) would block on approval even though every inner push step would skip.
+    # Mirror the step-level conditions in reusable-push-public.yml exactly.
+    if: |
+      needs.PREPARE.outputs.proceed_valid == 'true' &&
+      (
+        (contains(needs.PREPARE.outputs.targets, 'quay.io') && needs.PREPARE.outputs.quayio_available == 'true') ||
+        (contains(needs.PREPARE.outputs.targets, 'setonix-registry') && needs.PREPARE.outputs.setonixreg_available == 'true')
+      )
     uses: ./.github/workflows/reusable-push-public.yml
     with:
       runner_label: ${{ needs.PREPARE.outputs.runner_label }}
