@@ -337,8 +337,8 @@ jobs:
           | BUILD | ${{ inputs.result_build == 'success' && '✅ Success' || '❌ Failed' }} |
           | SCAN-AND-REPORT | ${{ inputs.result_scan == 'success' && '✅ Success' || (inputs.result_scan == 'skipped' && '⏭️ Skipped (scan=false)') || '❌ Failed' }} |
           | TEST | ${{ inputs.result_test == 'success' && '✅ Ran (see Tests section)' || (inputs.result_test == 'skipped' && '⏭️ Skipped (no tests)') || '❌ Failed' }} |
-          | PUSH-PRIV | ${{ inputs.result_push_priv == 'success' && '✅ Success' || '❌ Failed' }} |
-          | PUSH-PUBLIC | ${{ inputs.result_push_public == 'success' && '✅ Success' || '❌ Failed' }} |
+          | PUSH-PRIV | ${{ inputs.result_push_priv == 'success' && '✅ Success' || (inputs.result_push_priv == 'skipped' && '⏭️ Skipped') || '❌ Failed' }} |
+          | PUSH-PUBLIC | ${{ inputs.result_push_public == 'success' && '✅ Success' || (inputs.result_push_public == 'skipped' && '⏭️ Skipped (no public target selected)') || '❌ Failed' }} |
           | DEPLOY | ${{ inputs.result_deploy == 'success' && '✅ Success' || (inputs.result_deploy == 'skipped' && '⏭️ Skipped') || '❌ Failed' }} |
           EOF
 
