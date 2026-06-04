@@ -237,3 +237,45 @@ jobs:
       acacia_bucket: ${{ vars.ACACIA_BUCKETNAME }}
       acacia_sif_bucket: ${{ vars.ACACIA_SIF_BUCKETNAME }}
     secrets: inherit
+
+  CLEANUP_BRANCH:
+    # Delete the cicd branch when the run did NOT end in a merge (build/push
+    # failed, public approval rejected, or invalid manifest) so failed runs don't
+    # accumulate stale branches. Fires only when MERGE_TO_MAIN was SKIPPED — NOT
+    # when it FAILED (merge conflict), where the branch is kept for manual merge.
+    # Uses !cancelled() (not always()) so a run that was superseded/cancelled —
+    # where a newer run already owns this branch — never deletes it out from under
+    # the new run. Needs SUMMARY so deletion happens only after SUMMARY's checkout.
+    needs: [SUMMARY, MERGE_TO_MAIN]
+    if: |
+      !cancelled() && needs.MERGE_TO_MAIN.result == 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Delete stale cicd branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          echo "Run did not produce a merge — deleting stale branch ${BRANCH}…"
+          dcode=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${REPO}/git/refs/heads/${BRANCH}")
+          echo "delete HTTP ${dcode}"
+          {
+            echo "## 🧹 Branch cleanup"
+            if [ "$dcode" = "204" ]; then
+              echo "🧹 Run did not produce a merge — deleted stale branch \`${BRANCH}\` (recreated on next upload)."
+            elif [ "$dcode" = "422" ]; then
+              echo "ℹ️ Branch \`${BRANCH}\` already gone."
+            else
+              echo "ℹ️ Branch \`${BRANCH}\` not deleted (HTTP ${dcode})."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Best-effort housekeeping — never pile a red job on top of the real failure.
+          exit 0
