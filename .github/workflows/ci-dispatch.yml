@@ -147,7 +147,10 @@ jobs:
     # approval); for private-only / devmode runs PUSH_PUBLIC is skipped and it
     # merges as soon as build + private push succeed. Uses the server-side merges
     # API (atomic, no checkout/push race). main is the default, unprotected branch.
-    needs: [PREPARE, BUILD, PUSH_PRIV, PUSH_PUBLIC, DEPLOY]
+    # Also needs SUMMARY so the branch is deleted only AFTER SUMMARY's checkout — a
+    # parallel job fetching a commit on a just-deleted branch can fail. SUMMARY's
+    # result is not gated on (it's always() / cosmetic); we just wait for it.
+    needs: [PREPARE, BUILD, PUSH_PRIV, PUSH_PUBLIC, DEPLOY, SUMMARY]
     if: |
       !cancelled() &&
       needs.PREPARE.outputs.proceed_valid == 'true' &&
@@ -159,10 +162,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Merge branch into main
+      - name: Merge branch into main and delete it
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           echo "Promoting ${BRANCH} -> main via the GitHub merges API…"
@@ -173,7 +177,7 @@ jobs:
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${{ github.repository }}/merges" \
+            "https://api.github.com/repos/${REPO}/merges" \
             -d "$body")
           echo "HTTP ${code}"; cat /tmp/merge.json 2>/dev/null || true; echo
           {
@@ -185,6 +189,24 @@ jobs:
               *)   echo "❌ Merge failed (HTTP ${code}). See job log." ;;
             esac
           } >> "$GITHUB_STEP_SUMMARY"
+
+          # Only on a clean merge (content is safely in main) delete the now-redundant
+          # cicd branch. Best-effort: a delete failure is a warning, not a job failure.
+          if [ "$code" = "201" ] || [ "$code" = "204" ]; then
+            echo "Deleting branch ${BRANCH}…"
+            dcode=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${REPO}/git/refs/heads/${BRANCH}")
+            echo "delete HTTP ${dcode}"
+            if [ "$dcode" = "204" ]; then
+              echo "🧹 Deleted branch \`${BRANCH}\`." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "⚠️ Branch \`${BRANCH}\` not deleted (HTTP ${dcode}) — harmless, it's recreated on next upload." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+
           case "$code" in 201|204) exit 0 ;; *) exit 1 ;; esac
 
   SUMMARY:
