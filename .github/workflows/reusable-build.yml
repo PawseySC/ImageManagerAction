@@ -115,25 +115,51 @@ jobs:
           echo "Template values: $TEMPLATE_VALUES_JSON"
           cp "$DOCKERFILE_PATH" "$DOCKERFILE_PATH.original"
 
-          # Parse and rewrite ARG lines. Both name and value go through a
-          # strict char allowlist (matches the backend validator). Anything
-          # the allowlist rejects fails the build immediately.
-          while IFS=$'\t' read -r arg_name arg_value; do
-            [ -z "$arg_name" ] && continue
-            if ! [[ "$arg_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-              echo "Refusing to substitute non-identifier ARG name: $arg_name"; exit 1
-            fi
-            if ! [[ "$arg_value" =~ ^[A-Za-z0-9._+:/=,-]+$ ]]; then
-              echo "Refusing unsafe ARG value for $arg_name"; exit 1
-            fi
-            echo "Replacing ARG $arg_name with value: $arg_value"
-            sed -i "s#^ARG ${arg_name}=.*#ARG ${arg_name}=${arg_value}#g" "$DOCKERFILE_PATH"
-          done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$TEMPLATE_VALUES_JSON")
+          # Rewrite each templated `ARG NAME=...` line with its value. Done in
+          # Python as a literal file edit — no sed/shell interpolation (so a `#`,
+          # `&`, space or quote in the value can't break the substitution) and no
+          # over-strict char allowlist (configure-style flags with spaces and
+          # ${OTHER_ARG} refs are legitimate). Names must be ARG identifiers;
+          # values may be anything except a newline (which could inject a
+          # Dockerfile instruction). The value is double-quoted so it survives
+          # Docker's ARG parsing; ${...} is preserved for build-time expansion.
+          python3 - <<'PY'
+          import json, os, re, sys
+          vals = json.loads(os.environ["TEMPLATE_VALUES_JSON"])
+          path = os.environ["DOCKERFILE_PATH"]
+          ident = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+          for k in list(vals):
+              v = vals[k] if isinstance(vals[k], str) else str(vals[k])
+              if not ident.match(k):
+                  print(f"Refusing non-identifier ARG name: {k}"); sys.exit(1)
+              if '\n' in v or '\r' in v:
+                  print(f"Refusing ARG value with a newline: {k}"); sys.exit(1)
+              vals[k] = v
+          arg_re = re.compile(r'^(\s*ARG\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=.*$')
+          replaced, out = set(), []
+          with open(path) as f:
+              for line in f:
+                  nl = '\n' if line.endswith('\n') else ''
+                  m = arg_re.match(line.rstrip('\n'))
+                  if m and m.group(2) in vals:
+                      name = m.group(2)
+                      q = '"' + vals[name].replace('\\', '\\\\').replace('"', '\\"') + '"'
+                      out.append(f'{m.group(1)}{name}={q}{nl}')
+                      print(f"Replacing ARG {name} -> {q}")
+                      replaced.add(name)
+                  else:
+                      out.append(line)
+          with open(path, 'w') as f:
+              f.writelines(out)
+          miss = sorted(set(vals) - replaced)
+          if miss:
+              print(f"Template keys with no matching 'ARG NAME=' line (left as-is): {miss}")
+          PY
 
           echo "Dockerfile modifications completed"
           echo ""
           echo "=== Modified ARG lines ==="
-          grep "^ARG" "$DOCKERFILE_PATH" || echo "No ARG lines found"
+          grep -nE "^[[:space:]]*ARG[[:space:]]" "$DOCKERFILE_PATH" || echo "No ARG lines found"
           echo "=========================="
 
       - name: Configure podman environment
