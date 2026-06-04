@@ -39,6 +39,10 @@ on:
       result_scan:
         required: true
         type: string
+      result_test:
+        required: false
+        type: string
+        default: "skipped"
       result_push_priv:
         required: true
         type: string
@@ -332,10 +336,61 @@ jobs:
           | PREPARE | ${{ inputs.result_prepare == 'success' && '✅ Success' || '❌ Failed' }} |
           | BUILD | ${{ inputs.result_build == 'success' && '✅ Success' || '❌ Failed' }} |
           | SCAN-AND-REPORT | ${{ inputs.result_scan == 'success' && '✅ Success' || (inputs.result_scan == 'skipped' && '⏭️ Skipped (scan=false)') || '❌ Failed' }} |
+          | TEST | ${{ inputs.result_test == 'success' && '✅ Ran (see Tests section)' || (inputs.result_test == 'skipped' && '⏭️ Skipped (no tests)') || '❌ Failed' }} |
           | PUSH-PRIV | ${{ inputs.result_push_priv == 'success' && '✅ Success' || '❌ Failed' }} |
           | PUSH-PUBLIC | ${{ inputs.result_push_public == 'success' && '✅ Success' || '❌ Failed' }} |
           | DEPLOY | ${{ inputs.result_deploy == 'success' && '✅ Success' || (inputs.result_deploy == 'skipped' && '⏭️ Skipped') || '❌ Failed' }} |
           EOF
+
+      # Pull the per-variant test-results-* artifacts (each carries a
+      # test-result-N.json with status/exit_code/log_tail) so the markdown
+      # block below and the summary.json further down can render test outcomes.
+      - name: Download test results
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-results-*
+          path: /tmp/test-artifacts
+
+      - name: Generate tests block
+        id: tests_block
+        run: |
+          set -uo pipefail
+          OUT=/tmp/tests_block.txt
+          RESULT_TEST="${{ inputs.result_test }}"
+
+          if [ "$RESULT_TEST" = "skipped" ] || [ -z "$RESULT_TEST" ]; then
+            echo "> ℹ️ No tests were provided for this image. Upload an \`entrypoint-tests.sh\` (or a test archive) in the web UI to have the pipeline run it inside each built image." > "$OUT"
+          elif ls /tmp/test-artifacts/*/test-result-*.json >/dev/null 2>&1; then
+            passed=0; failed=0
+            echo "| Variant | Result | Exit code |" > "$OUT"
+            echo "|---------|--------|-----------|" >> "$OUT"
+            for f in /tmp/test-artifacts/*/test-result-*.json; do
+              img=$(jq -r '.image_name' "$f")
+              st=$(jq -r '.status' "$f")
+              code=$(jq -r '.exit_code' "$f")
+              if [ "$st" = "passed" ]; then icon="✅ passed"; passed=$((passed+1)); else icon="❌ failed"; failed=$((failed+1)); fi
+              echo "| \`$img\` | $icon | $code |" >> "$OUT"
+            done
+            echo "" >> "$OUT"
+            echo "**${passed} passed, ${failed} failed** — tests are advisory (report-only) and do not block publishing." >> "$OUT"
+            echo "" >> "$OUT"
+            for f in /tmp/test-artifacts/*/test-result-*.json; do
+              img=$(jq -r '.image_name' "$f")
+              st=$(jq -r '.status' "$f")
+              echo "<details><summary>🧪 ${img} — ${st} — entrypoint-tests.sh output</summary>" >> "$OUT"
+              echo "" >> "$OUT"
+              echo '```' >> "$OUT"
+              jq -r '.log_tail // ""' "$f" >> "$OUT"
+              echo '```' >> "$OUT"
+              echo "" >> "$OUT"
+              echo "</details>" >> "$OUT"
+              echo "" >> "$OUT"
+            done
+          else
+            echo "> ⚠️ The test stage ran (result: \`${RESULT_TEST}\`) but no result artifacts were found." > "$OUT"
+          fi
 
       - name: Render summary from template
         run: |
@@ -378,10 +433,15 @@ jobs:
             d
           }' /tmp/summary_step4.md > /tmp/summary_step5.md
 
+          sed -e '/__TESTS_BLOCK__/{
+            r /tmp/tests_block.txt
+            d
+          }' /tmp/summary_step5.md > /tmp/summary_step6.md
+
           sed -e '/__JOB_RESULTS_BLOCK__/{
             r /tmp/job_results_block.txt
             d
-          }' /tmp/summary_step5.md > /tmp/summary_final.md
+          }' /tmp/summary_step6.md > /tmp/summary_final.md
 
           # Append final rendered summary to workflow summary
           cat /tmp/summary_final.md >> $GITHUB_STEP_SUMMARY
@@ -416,6 +476,7 @@ jobs:
           RESULT_PREPARE: ${{ inputs.result_prepare }}
           RESULT_BUILD: ${{ inputs.result_build }}
           RESULT_SCAN: ${{ inputs.result_scan }}
+          RESULT_TEST: ${{ inputs.result_test }}
           RESULT_PUSH_PRIV: ${{ inputs.result_push_priv }}
           RESULT_PUSH_PUBLIC: ${{ inputs.result_push_public }}
           RESULT_DEPLOY: ${{ inputs.result_deploy }}
@@ -500,6 +561,19 @@ jobs:
             }' /tmp/scan-artifacts/*/scan-counts.json 2>/dev/null || echo null)
           fi
 
+          # Aggregate per-variant test results (downloaded above). null if the
+          # TEST stage was skipped (no test bundle) or produced no artifacts.
+          TESTS_JSON=null
+          if ls /tmp/test-artifacts/*/test-result-*.json >/dev/null 2>&1; then
+            TESTS_JSON=$(jq -s '{
+              available: true,
+              tested_variants: length,
+              passed: (map(select(.status == "passed")) | length),
+              failed: (map(select(.status == "failed")) | length),
+              results: map({image_name, exit_code, status, log_tail})
+            }' /tmp/test-artifacts/*/test-result-*.json 2>/dev/null || echo null)
+          fi
+
           jq -n \
             --arg main "$MAIN" --arg feature "$FEATURE" --arg version "$VERSION" \
             --arg platform "$PLATFORM" --arg branch "$BRANCH" \
@@ -509,9 +583,11 @@ jobs:
             --arg dbucket "$ACACIA_BUCKET" --arg sbucket "$ACACIA_SIF_BUCKET" \
             --arg quay_avail "$QUAYIO_AVAILABLE" --arg setonix_avail "$SETONIXREG_AVAILABLE" \
             --arg rp "$RESULT_PREPARE" --arg rb "$RESULT_BUILD" --arg rs "$RESULT_SCAN" \
+            --arg rt "$RESULT_TEST" \
             --arg rpp "$RESULT_PUSH_PRIV" --arg rpub "$RESULT_PUSH_PUBLIC" --arg rd "$RESULT_DEPLOY" \
             --argjson variants "$variants" \
             --argjson scan "$SCAN_JSON" \
+            --argjson tests "$TESTS_JSON" \
             '{
               schema: 1,
               main: $main, feature: $feature, version: $version, platform: $platform,
@@ -521,8 +597,9 @@ jobs:
               targets: $targets,
               registries_available: {quayio: ($quay_avail == "true"), setonix: ($setonix_avail == "true")},
               buckets: {docker: $dbucket, sif: $sbucket},
-              results: {prepare:$rp, build:$rb, scan:$rs, push_priv:$rpp, push_public:$rpub, deploy:$rd},
+              results: {prepare:$rp, build:$rb, scan:$rs, test:$rt, push_priv:$rpp, push_public:$rpub, deploy:$rd},
               scan: $scan,
+              tests: $tests,
               variants: $variants
             }' > summary.json
 

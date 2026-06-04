@@ -1,0 +1,182 @@
+name: Reusable — TEST (entrypoint-tests.sh)
+
+# Runs the user-provided test bundle against each built image variant.
+# The bundle lives at {branch_path}/tests/ in the repo (entrypoint-tests.sh at
+# its root). It is mounted at /opt/tests INSIDE the built image and executed
+# there. This stage is REPORT-ONLY: a non-zero exit is surfaced in the summary
+# but never fails the job, so it does not block PUSH/DEPLOY.
+
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        required: true
+        type: string
+      main:
+        required: true
+        type: string
+      feature:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      has_template:
+        required: true
+        type: string
+      build_matrix:
+        required: true
+        type: string
+      correlation_id:
+        required: true
+        type: string
+      branch_path:
+        required: true
+        type: string
+    secrets:
+      ACACIA_ACCESS_KEY_ID:
+        required: true
+      ACACIA_SECRET_ACCESS_KEY:
+        required: true
+
+jobs:
+  test:
+    runs-on: ${{ fromJSON(inputs.runner_label) }}
+    timeout-minutes: 30
+    strategy:
+      matrix: ${{ fromJson(inputs.build_matrix) }}
+      fail-fast: false
+    env:
+      VERSION: ${{ inputs.version }}
+      BUCKET: ${{ vars.ACACIA_BUCKETNAME }}
+      RESULT_DIR: ./test-results
+    steps:
+    - name: Checkout (for the test bundle)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+
+    - name: Set image name for this variant
+      run: |
+        set -euo pipefail
+        IMAGE_NAME='${{ matrix.image_name }}'
+        echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+        echo "Image name: $IMAGE_NAME"
+
+    - name: Display test environment
+      run: |
+        echo "Hostname: $(hostname)"
+        echo "Testing: ${IMAGE_NAME}:${VERSION}"
+        echo "Variant #${{ matrix.index }}"
+        echo "Test bundle: ${{ inputs.branch_path }}/tests/"
+
+    - name: Configure podman environment
+      run: |
+        # Per-runner isolation so multiple runners (even on one machine) never
+        # share a rootless-podman store. RID = stable fs-safe hash of runner name.
+        RID=$(printf '%s' "${RUNNER_NAME:-default}" | sha1sum | cut -c1-12)
+        export XDG_DATA_HOME=/container/${USER}/data-${RID}
+        export XDG_RUNTIME_DIR=/container/${USER}/runtime-${RID}
+        export TMPDIR=/container/${USER}/tmp-${RID}/
+        mkdir -p "${XDG_DATA_HOME}" "${XDG_RUNTIME_DIR}" "${TMPDIR}"
+        echo "RID=${RID}" >> $GITHUB_ENV
+        echo "XDG_DATA_HOME=${XDG_DATA_HOME}" >> $GITHUB_ENV
+        echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> $GITHUB_ENV
+        echo "TMPDIR=${TMPDIR}" >> $GITHUB_ENV
+
+    - name: Download archive from S3
+      id: locate_archive
+      uses: ./.github/actions/setup-rclone
+      with:
+        access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+        secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+        endpoint: https://projects.pawsey.org.au
+        bucket: ${{ env.BUCKET }}
+        destination_path: ${{ env.IMAGE_NAME }}_${{ env.VERSION }}.tar
+        download_mode: true
+        dockerfile_name: ${{ env.IMAGE_NAME }}
+        version: ${{ env.VERSION }}
+        load_to_podman: false
+
+    - name: Run entrypoint tests inside the image
+      id: run_tests
+      run: |
+        set -uo pipefail
+        mkdir -p "${RESULT_DIR}"
+        IDX='${{ matrix.index }}'
+        LOG="${RESULT_DIR}/test-output-${IDX}.log"
+        RESULT_JSON="${RESULT_DIR}/test-result-${IDX}.json"
+        TESTS_DIR="${GITHUB_WORKSPACE}/${{ inputs.branch_path }}/tests"
+
+        echo "Tests directory: $TESTS_DIR"
+        if [ ! -f "${TESTS_DIR}/entrypoint-tests.sh" ]; then
+          echo "entrypoint-tests.sh not found at ${TESTS_DIR}" | tee "$LOG"
+          code=127
+        else
+          echo "📦 Loading image from archive..."
+          archive_file="${{ steps.locate_archive.outputs.archive_name }}"
+          if ! podman load -i "$archive_file"; then
+            echo "Failed to load image from archive: $archive_file" | tee "$LOG"
+            code=125
+          else
+            image_tag="${IMAGE_NAME}:${VERSION}"
+            echo "▶️  Running /opt/tests/entrypoint-tests.sh inside ${image_tag}"
+            echo "--------------------------------------------------------"
+            # Override entrypoint to a shell. Honor the script's shebang when it
+            # is executable (archive uploads can carry +x); otherwise run it
+            # under the image's /bin/sh. Mounted read-only at /opt/tests.
+            set +e
+            podman run --rm --entrypoint /bin/sh \
+              -v "${TESTS_DIR}:/opt/tests:ro" -w /opt/tests \
+              "$image_tag" \
+              -c 'if [ -x ./entrypoint-tests.sh ]; then exec ./entrypoint-tests.sh; else exec /bin/sh ./entrypoint-tests.sh; fi' \
+              > "$LOG" 2>&1
+            code=$?
+            set -e
+            podman rmi "$image_tag" 2>/dev/null || true
+          fi
+        fi
+
+        echo "--------------------------------------------------------"
+        echo "entrypoint-tests.sh exit code: $code"
+        if [ "$code" -eq 0 ]; then status="passed"; else status="failed"; fi
+
+        # Per-variant machine-readable result (+ truncated log) for the SUMMARY job.
+        jq -n \
+          --arg img "$IMAGE_NAME" \
+          --arg ver "$VERSION" \
+          --argjson code "$code" \
+          --arg status "$status" \
+          --arg log "$(tail -c 6000 "$LOG" 2>/dev/null)" \
+          '{image_name:$img, version:$ver, exit_code:$code, status:$status, log_tail:$log}' \
+          > "$RESULT_JSON"
+
+        # Live workflow summary (collapsible output).
+        {
+          echo "## 🧪 Test — \`${IMAGE_NAME}\`"
+          if [ "$code" -eq 0 ]; then
+            echo "**Result:** ✅ passed (exit 0)"
+          else
+            echo "**Result:** ❌ failed (exit ${code})"
+          fi
+          echo ""
+          echo "<details><summary>entrypoint-tests.sh output</summary>"
+          echo ""
+          echo '```'
+          tail -c 20000 "$LOG" 2>/dev/null || echo "(no output captured)"
+          echo '```'
+          echo ""
+          echo "</details>"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        # Report-only: do not fail the job on a non-zero test exit.
+        exit 0
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v7
+      if: always()
+      with:
+        name: test-results-${{ env.IMAGE_NAME }}-${{ env.VERSION }}-variant-${{ matrix.index }}
+        path: ${{ env.RESULT_DIR }}/
+        retention-days: 30
+        if-no-files-found: warn

@@ -57,6 +57,24 @@ jobs:
       correlation_id: ${{ needs.PREPARE.outputs.correlation_id }}
     secrets: inherit
 
+  TEST:
+    needs: [PREPARE, BUILD]
+    # Report-only: runs the user's entrypoint-tests.sh inside each built image.
+    # Only scheduled when a test bundle was committed (PREPARE.has_tests). Never
+    # gates PUSH/DEPLOY — its result is surfaced in the summary only.
+    if: needs.PREPARE.outputs.proceed_valid == 'true' && needs.PREPARE.outputs.has_tests == 'true'
+    uses: ./.github/workflows/reusable-test.yml
+    with:
+      runner_label: ${{ needs.PREPARE.outputs.runner_label }}
+      main: ${{ needs.PREPARE.outputs.main }}
+      feature: ${{ needs.PREPARE.outputs.feature }}
+      version: ${{ needs.PREPARE.outputs.version }}
+      has_template: ${{ needs.PREPARE.outputs.has_template }}
+      build_matrix: ${{ needs.PREPARE.outputs.build_matrix }}
+      correlation_id: ${{ needs.PREPARE.outputs.correlation_id }}
+      branch_path: ${{ needs.PREPARE.outputs.branch_path }}
+    secrets: inherit
+
   PUSH_PRIV:
     needs: [PREPARE, BUILD]
     if: needs.PREPARE.outputs.proceed_valid == 'true'
@@ -123,7 +141,7 @@ jobs:
     secrets: inherit
 
   SUMMARY:
-    needs: [PREPARE, BUILD, SCAN, PUSH_PRIV, PUSH_PUBLIC, DEPLOY]
+    needs: [PREPARE, BUILD, SCAN, TEST, PUSH_PRIV, PUSH_PUBLIC, DEPLOY]
     if: always() && needs.PREPARE.outputs.proceed_valid == 'true'
     uses: ./.github/workflows/reusable-summary.yml
     with:
@@ -139,6 +157,7 @@ jobs:
       result_prepare: ${{ needs.PREPARE.result }}
       result_build: ${{ needs.BUILD.result }}
       result_scan: ${{ needs.SCAN.result }}
+      result_test: ${{ needs.TEST.result }}
       result_push_priv: ${{ needs.PUSH_PRIV.result }}
       result_push_public: ${{ needs.PUSH_PUBLIC.result }}
       result_deploy: ${{ needs.DEPLOY.result }}

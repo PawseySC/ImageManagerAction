@@ -52,6 +52,9 @@ on:
       dockerfile_path:
         description: "Path to Dockerfile"
         value: ${{ jobs.prepare.outputs.dockerfile_path }}
+      has_tests:
+        description: "Whether a committed test bundle (tests/entrypoint-tests.sh) exists"
+        value: ${{ jobs.prepare.outputs.has_tests }}
       correlation_id:
         description: "Unique ID for tracking"
         value: ${{ jobs.prepare.outputs.correlation_id }}
@@ -96,6 +99,7 @@ jobs:
       private_targets: ${{ steps.validate_manifest.outputs.private_targets }}
       branch_path: ${{ steps.validate_manifest.outputs.branch_path }}
       dockerfile_path: ${{ steps.validate_manifest.outputs.dockerfile_path }}
+      has_tests: ${{ steps.validate_manifest.outputs.has_tests }}
       correlation_id: ${{ steps.validate_manifest.outputs.correlation_id }}
       date: ${{ steps.date.outputs.date }}
       dockerhub_available: ${{ steps.check_vars_secrets.outputs.dockerhub_available }}
@@ -298,6 +302,18 @@ jobs:
 
           echo "✓ Found manifest.json and Dockerfile"
 
+          # Detect an optional committed test bundle. The web app writes
+          # tests/entrypoint-tests.sh (+ any helpers) and flags it in manifest.json.
+          # File presence is the source of truth for whether the TEST job runs.
+          tests_entrypoint="${branch_path}/tests/entrypoint-tests.sh"
+          if [ -f "$tests_entrypoint" ]; then
+            has_tests=true
+            echo "✓ Found test bundle: $tests_entrypoint"
+          else
+            has_tests=false
+            echo "No test bundle (tests/entrypoint-tests.sh) found"
+          fi
+
           # Parse and validate manifest.json
           echo "Parsing manifest.json..."
 
@@ -398,6 +414,7 @@ jobs:
           echo "private_targets=$private_targets" >> $GITHUB_OUTPUT
           echo "branch_path=$branch_path" >> $GITHUB_OUTPUT
           echo "dockerfile_path=$dockerfile_path" >> $GITHUB_OUTPUT
+          echo "has_tests=$has_tests" >> $GITHUB_OUTPUT
           echo "correlation_id=$correlation_id" >> $GITHUB_OUTPUT
 
       - name: Decide runner by platform

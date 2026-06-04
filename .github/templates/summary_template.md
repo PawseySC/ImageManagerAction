@@ -15,6 +15,10 @@ __VARIANT_BLOCK__
 
 __ARCHIVE_BLOCK__
 
+## 🧪 Tests
+
+__TESTS_BLOCK__
+
 ## 🏗️ Container Registry Deployments
 
 __REGISTRY_BLOCK__
