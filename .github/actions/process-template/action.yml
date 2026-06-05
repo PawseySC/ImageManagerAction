@@ -45,6 +45,12 @@ runs:
         base_raw="${main}-${feature}"
         base_sanitized=$(echo "$base_raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^[.-]*//;s/[.-]*$//')
 
+        # The user's naming scheme: org.opencontainers.image.name may contain
+        # ${TEMPLATE_VAR} placeholders that we expand per variant to produce the
+        # image name (drives tar/sif filenames + registry tags + the catalog).
+        # Falls back to main-feature when the label is absent or can't be expanded.
+        name_tmpl=$(jq -r '.labels["org.opencontainers.image.name"] // empty' "$manifest_file")
+
         # Check if template field exists
         if ! jq -e '.template' "$manifest_file" > /dev/null 2>&1; then
           echo "No template field found in manifest.json"
@@ -53,7 +59,13 @@ runs:
           # Single-variant matrix MUST still carry image_name + variant_suffix; the
           # downstream BUILD job reads them as `${{ matrix.image_name }}` and an empty
           # value produces a `tag :version: invalid reference format` error.
-          single_matrix=$(jq -nc --arg img "$base_sanitized" \
+          # Honor a STATIC org.opencontainers.image.name (no template vars to expand
+          # in the no-template path); else fall back to main-feature.
+          nt_img="$base_sanitized"
+          if [ -n "$name_tmpl" ] && ! printf '%s' "$name_tmpl" | grep -q '[$]{'; then
+            nt_img=$(printf '%s' "$name_tmpl" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^[.-]*//;s/[.-]*$//')
+          fi
+          single_matrix=$(jq -nc --arg img "$nt_img" \
             '{include: [{index: 1, values: {}, varying_keys: [], variant_suffix: "", image_name: $img}]}')
           echo "matrix=$single_matrix" >> $GITHUB_OUTPUT
           exit 0
@@ -162,6 +174,7 @@ runs:
         matrix_json=$(echo "$combinations" | jq -c \
           --argjson vk "$varying_keys_json" \
           --arg base "$base_sanitized" \
+          --arg name_tmpl "$name_tmpl" \
           '[
           to_entries |
           .[] |
@@ -179,15 +192,34 @@ runs:
               join("")
             ),
             image_name: (
-              $base + (
-                .value |
-                to_entries |
-                map(
-                  select(.key as $k | $vk | contains([$k])) |
-                  "-" + (.key | ascii_downcase) + "-" + (.value | tostring | ascii_downcase)
-                ) |
-                join("")
+              # Expand ${VAR} in the user's name template from this variant's values.
+              (if ($name_tmpl | length) > 0
+               then (reduce (.value | to_entries[]) as $e ($name_tmpl;
+                       gsub("\\$\\{" + $e.key + "\\}"; ($e.value | tostring))))
+               else "" end) as $expanded |
+              if (($name_tmpl | length) > 0) and (($expanded | test("\\$\\{")) | not)
+              then (
+                # Use the user's name; append any VARYING key it didn't reference so
+                # multi-variant builds never collide on the same name.
+                ($expanded + (
+                  .value | to_entries
+                  | map(select(.key as $k
+                               | ($vk | contains([$k]))
+                                 and (($name_tmpl | test("\\$\\{" + $k + "\\}")) | not)))
+                  | map("-" + (.key | ascii_downcase) + "-" + (.value | tostring | ascii_downcase))
+                  | join("")))
+                | ascii_downcase | gsub("[^a-z0-9._-]"; "-") | gsub("-+"; "-")
+                | gsub("^[.-]+"; "") | gsub("[.-]+$"; "")
               )
+              else (
+                # Fall back: main-feature + varying-key suffix (legacy).
+                $base + (
+                  .value | to_entries
+                  | map(select(.key as $k | $vk | contains([$k]))
+                        | "-" + (.key | ascii_downcase) + "-" + (.value | tostring | ascii_downcase))
+                  | join(""))
+              )
+              end
             )
           }
         ] | {include: .}')
