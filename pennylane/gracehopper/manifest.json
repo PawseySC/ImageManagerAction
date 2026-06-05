@@ -1,12 +1,14 @@
 {
   "main": "pennylane",
   "feature": "gracehopper",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "devmode": true,
   "scan": false,
   "platform": "arm",
   "shpc": false,
-  "targets": [],
+  "targets": [
+    "setonix-registry"
+  ],
   "private-targets": [
     "liu268"
   ],
@@ -16,8 +18,8 @@
     "path": "pennylane/gracehopper/"
   },
   "metadata": {
-    "timestamp": "2026-06-05T01:14:05.739044Z",
-    "correlation_id": "7ec43b3c-a82a-453d-ab9a-618ade2890c7"
+    "timestamp": "2026-06-05T03:29:36.849345Z",
+    "correlation_id": "883cad36-e8db-475b-9f31-b655b6244a99"
   },
   "template": {
     "PENNYLANE_VERSION": "v0.45.0",
@@ -30,7 +32,7 @@
   },
   "labels": {
     "org.opencontainers.image.authors": "Shusen Liu",
-    "org.opencontainers.image.name": "pennylane-python${PYTHON_VERSION}-cuda${CUDA_VER}-lightening${LIGHTNING_VERSION}-gcc${GCC_VERSION}",
+    "org.opencontainers.image.name": "python${PYTHON_VERSION}-pennylane${PENNYLANE_VERSION}-lightning${LIGHTNING_VERSION}",
     "org.opencontainers.image.noscan": "false"
   }
 }

@@ -177,9 +177,9 @@ RUN pip install --no-cache-dir --force-reinstall pennylane_lightning*.whl
 RUN pip install --no-cache-dir git+https://github.com/PennyLaneAI/pennylane.git@${PENNYLANE_VERSION}
 RUN pip install --no-cache-dir matplotlib jupyterlab
 LABEL org.opencontainers.image.authors="Shusen Liu"
-LABEL org.opencontainers.image.name="pennylane-python${PYTHON_VERSION}-cuda${CUDA_VER}-lightening${LIGHTNING_VERSION}-gcc${GCC_VERSION}"
+LABEL org.opencontainers.image.name="python${PYTHON_VERSION}-pennylane${PENNYLANE_VERSION}-lightning${LIGHTNING_VERSION}"
 LABEL org.opencontainers.image.noscan="false"
-LABEL org.opencontainers.image.version="0.0.3"
+LABEL org.opencontainers.image.version="0.0.4"
 LABEL org.opencontainers.image.devmode="true"
 LABEL org.opencontainers.image.scan="false"
 LABEL org.opencontainers.image.platform="arm"
