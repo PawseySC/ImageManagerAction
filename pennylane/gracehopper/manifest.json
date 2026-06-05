@@ -1,0 +1,36 @@
+{
+  "main": "pennylane",
+  "feature": "gracehopper",
+  "version": "0.0.3",
+  "devmode": true,
+  "scan": false,
+  "platform": "arm",
+  "shpc": false,
+  "targets": [],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "PawseySC/ImageManagerAction",
+    "branch": "cicd-pennylane/gracehopper",
+    "path": "pennylane/gracehopper/"
+  },
+  "metadata": {
+    "timestamp": "2026-06-05T01:14:05.739044Z",
+    "correlation_id": "7ec43b3c-a82a-453d-ab9a-618ade2890c7"
+  },
+  "template": {
+    "PENNYLANE_VERSION": "v0.45.0",
+    "PYTHON_VERSION": "3.11",
+    "CUDA_VER": "12.8.1",
+    "LIGHTNING_VERSION": "v0.45.0",
+    "CUDA_ARCH": "HOPPER90",
+    "DEBIAN_FRONTEND": "noninteractive",
+    "GCC_VERSION": "11"
+  },
+  "labels": {
+    "org.opencontainers.image.authors": "Shusen Liu",
+    "org.opencontainers.image.name": "pennylane-python${PYTHON_VERSION}-cuda${CUDA_VER}-lightening${LIGHTNING_VERSION}-gcc${GCC_VERSION}",
+    "org.opencontainers.image.noscan": "false"
+  }
+}
