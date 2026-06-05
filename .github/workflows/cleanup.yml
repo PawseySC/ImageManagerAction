@@ -1,0 +1,76 @@
+name: Cleanup — delete S3 artifacts
+
+# Triggered (workflow_dispatch) by ImageManagerWeb when a main software / feature
+# is deleted in the Config UI. Deletes the published tar/sif objects from Acacia
+# so removed images don't leave artifacts behind. Runs on a self-hosted runner
+# that already has the ACACIA credentials + reaches the object store.
+
+on:
+  workflow_dispatch:
+    inputs:
+      paths:
+        description: 'JSON array of s3:// tar/sif paths to delete'
+        required: true
+        type: string
+
+jobs:
+  cleanup:
+    runs-on: [self-hosted, X64]
+    timeout-minutes: 15
+    steps:
+      - name: Delete S3 artifacts via rclone
+        shell: bash
+        env:
+          PATHS_JSON: ${{ inputs.paths }}
+          ACACIA_KEY: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+          ACACIA_SECRET: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+        run: |
+          set -uo pipefail
+
+          # --- ensure rclone (PATH -> Setonix module -> spack -> static download) ---
+          if ! command -v rclone >/dev/null 2>&1; then module load rclone/1.68.1 2>/dev/null || true; fi
+          if ! command -v rclone >/dev/null 2>&1; then module load spack 2>/dev/null && spack load rclone 2>/dev/null || true; fi
+          if ! command -v rclone >/dev/null 2>&1; then
+            case "$(uname -m)" in aarch64|arm64) A=arm64 ;; *) A=amd64 ;; esac
+            mkdir -p "${RUNNER_TEMP}/rclone-bin"
+            curl -fsSL "https://downloads.rclone.org/rclone-current-linux-${A}.zip" -o "${RUNNER_TEMP}/r.zip" 2>/dev/null \
+              && unzip -o -j "${RUNNER_TEMP}/r.zip" '*/rclone' -d "${RUNNER_TEMP}/rclone-bin" >/dev/null 2>&1 \
+              && export PATH="${RUNNER_TEMP}/rclone-bin:$PATH" || true
+          fi
+          command -v rclone >/dev/null 2>&1 || { echo "rclone unavailable"; exit 1; }
+
+          # --- rclone config for Acacia (Ceph S3) ---
+          cfg="${RUNNER_TEMP}/rclone-cleanup.conf"
+          ( umask 077; cat > "$cfg" <<EOF
+          [pawsey0012]
+          type = s3
+          provider = Ceph
+          endpoint = https://projects.pawsey.org.au
+          access_key_id = ${ACACIA_KEY}
+          secret_access_key = ${ACACIA_SECRET}
+          EOF
+          )
+
+          total=$(echo "$PATHS_JSON" | jq 'length' 2>/dev/null || echo 0)
+          echo "Requested deletion of ${total} object(s)."
+          deleted=0; missing=0
+          while IFS= read -r p; do
+            [ -z "$p" ] && continue
+            case "$p" in s3://*) ;; *) echo "skip (not s3://): $p"; continue ;; esac
+            # s3://bucket/key -> pawsey0012:bucket/key
+            rp="pawsey0012:${p#s3://}"
+            if rclone --config "$cfg" deletefile "$rp" 2>/dev/null; then
+              echo "✓ deleted $p"; deleted=$((deleted+1))
+            else
+              echo "· not found / already gone: $p"; missing=$((missing+1))
+            fi
+          done < <(echo "$PATHS_JSON" | jq -r '.[]?')
+
+          rm -f "$cfg"
+          {
+            echo "## 🧹 S3 artifact cleanup"
+            echo "- Requested: ${total}"
+            echo "- Deleted: ${deleted}"
+            echo "- Already gone: ${missing}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Done: ${deleted} deleted, ${missing} already gone."
