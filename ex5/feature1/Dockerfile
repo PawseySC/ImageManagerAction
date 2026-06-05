@@ -16,7 +16,7 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 # default command
 CMD ["node", "-v"]
-LABEL org.opencontainers.image.authors="Shusen"
+LABEL org.opencontainers.image.authors="Shusen Liu"
 LABEL org.opencontainers.image.name="${DEBIAN_VERSION}-${CURL_ENABLED}"
 LABEL org.opencontainers.image.noscan="true"
 LABEL org.opencontainers.image.version="0.0.21"
