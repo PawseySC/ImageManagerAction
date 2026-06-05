@@ -1,7 +1,7 @@
 {
   "main": "ex5",
   "feature": "feature1",
-  "version": "0.0.19",
+  "version": "0.0.21",
   "devmode": true,
   "scan": false,
   "platform": "x86",
@@ -16,8 +16,8 @@
     "path": "ex5/feature1/"
   },
   "metadata": {
-    "timestamp": "2026-06-05T02:29:51.664608Z",
-    "correlation_id": "3a106aca-594b-4cfc-84b9-efa805927ea1"
+    "timestamp": "2026-06-05T02:51:51.668088Z",
+    "correlation_id": "a52cfcd8-12ac-4a49-9aa5-b03f4ee657e9"
   },
   "template": {
     "DEBIAN_VERSION": [
@@ -31,6 +31,7 @@
   },
   "labels": {
     "org.opencontainers.image.authors": "Shusen",
-    "org.opencontainers.image.name": "${DEBIAN_VERSION}-${CURL_ENABLED}"
+    "org.opencontainers.image.name": "${DEBIAN_VERSION}-${CURL_ENABLED}",
+    "org.opencontainers.image.noscan": "true"
   }
 }
