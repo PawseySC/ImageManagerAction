@@ -59,11 +59,11 @@ runs:
           # Single-variant matrix MUST still carry image_name + variant_suffix; the
           # downstream BUILD job reads them as `${{ matrix.image_name }}` and an empty
           # value produces a `tag :version: invalid reference format` error.
-          # Honor a STATIC org.opencontainers.image.name (no template vars to expand
-          # in the no-template path); else fall back to main-feature.
+          # main-feature, plus a STATIC org.opencontainers.image.name suffix when given
+          # (no template vars to expand in the no-template path).
           nt_img="$base_sanitized"
           if [ -n "$name_tmpl" ] && ! printf '%s' "$name_tmpl" | grep -q '[$]{'; then
-            nt_img=$(printf '%s' "$name_tmpl" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^[.-]*//;s/[.-]*$//')
+            nt_img=$(printf '%s-%s' "$base_sanitized" "$name_tmpl" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^[.-]*//;s/[.-]*$//')
           fi
           single_matrix=$(jq -nc --arg img "$nt_img" \
             '{include: [{index: 1, values: {}, varying_keys: [], variant_suffix: "", image_name: $img}]}')
@@ -199,9 +199,9 @@ runs:
                else "" end) as $expanded |
               if (($name_tmpl | length) > 0) and (($expanded | test("\\$\\{")) | not)
               then (
-                # Use the name; append any VARYING key it does not reference so
-                # multi-variant builds never collide on the same name.
-                ($expanded + (
+                # Always prefix with main-feature; append any VARYING key the name
+                # does not reference so multi-variant builds never collide.
+                ($base + "-" + $expanded + (
                   .value | to_entries
                   | map(select(.key as $k
                                | ($vk | contains([$k]))
