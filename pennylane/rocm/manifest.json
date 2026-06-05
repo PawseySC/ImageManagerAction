@@ -1,0 +1,36 @@
+{
+  "main": "pennylane",
+  "feature": "rocm",
+  "version": "0.0.1",
+  "devmode": true,
+  "scan": false,
+  "platform": "x86",
+  "shpc": false,
+  "targets": [
+    "setonix-registry"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "PawseySC/ImageManagerAction",
+    "branch": "cicd-pennylane/rocm",
+    "path": "pennylane/rocm/"
+  },
+  "metadata": {
+    "timestamp": "2026-06-05T04:56:51.149276Z",
+    "correlation_id": "daf55646-1163-43bc-98e4-63941f1ccb4e"
+  },
+  "template": {
+    "PY_VER": "3.11",
+    "PENNYLANE_VERSION": "v0.45.0",
+    "LIGHTNING_VERSION": "v0.45.0",
+    "AMD_ARCH": "AMD_GFX90A",
+    "GCC_HOST_VER": "11",
+    "DEBIAN_FRONTEND": "noninteractive"
+  },
+  "labels": {
+    "org.opencontainers.image.authors": "Shusen Liu",
+    "org.opencontainers.image.name": "python${PY_VER}-pennylane${PENNYLANE_VERSION}-lighning${LIGHTNING_VERSION}"
+  }
+}
