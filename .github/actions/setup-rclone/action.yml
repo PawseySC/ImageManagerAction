@@ -109,12 +109,39 @@ runs:
           fi
         fi
 
-        # Method 3: Try Ella/ARM spack method (module load spack + spack load rclone)
-        echo "Trying Ella/ARM spack method..."
+        # Method 3: spack (e.g. Ella) — module load spack + spack load rclone
+        echo "Trying spack (module load spack + spack load rclone)..."
         if module load spack 2>/dev/null; then
           if spack load rclone 2>/dev/null; then
             if command -v rclone >/dev/null 2>&1; then
               echo "✓ rclone loaded via spack"
+              rclone version
+              echo "loaded=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+        fi
+
+        # Method 4: static rclone binary for this architecture. Works on ANY
+        # self-hosted runner with outbound internet — no Setonix module / Ella
+        # spack required, so ARM64 work isn't tied to one host. Persisted via
+        # $GITHUB_PATH so later steps find it in PATH.
+        echo "Trying static rclone download..."
+        case "$(uname -m)" in
+          aarch64|arm64) RARCH=arm64 ;;
+          x86_64|amd64)  RARCH=amd64 ;;
+          *)             RARCH="" ;;
+        esac
+        if [ -n "$RARCH" ]; then
+          RBIN="${RUNNER_TEMP:-/tmp}/rclone-bin"
+          mkdir -p "$RBIN"
+          if curl -fsSL "https://downloads.rclone.org/rclone-current-linux-${RARCH}.zip" -o "$RBIN/rclone.zip" 2>/dev/null \
+             && unzip -o -j "$RBIN/rclone.zip" '*/rclone' -d "$RBIN" >/dev/null 2>&1 \
+             && chmod +x "$RBIN/rclone"; then
+            echo "$RBIN" >> "$GITHUB_PATH"
+            export PATH="$RBIN:$PATH"
+            if command -v rclone >/dev/null 2>&1; then
+              echo "✓ rclone installed via static download ($RARCH)"
               rclone version
               echo "loaded=true" >> $GITHUB_OUTPUT
               exit 0
@@ -127,7 +154,8 @@ runs:
         echo "Tried:"
         echo "  1. Direct PATH lookup"
         echo "  2. module load rclone/1.68.1 (Setonix)"
-        echo "  3. module load spack && spack load rclone (Ella/ARM)"
+        echo "  3. module load spack && spack load rclone"
+        echo "  4. static download from downloads.rclone.org"
         exit 1
 
     - name: Configure rclone (local config)
@@ -140,13 +168,26 @@ runs:
           if command -v rclone >/dev/null 2>&1; then
             return 0
           fi
-          # Try Setonix method
+          # Setonix module
           if module load rclone/1.68.1 2>/dev/null && command -v rclone >/dev/null 2>&1; then
             return 0
           fi
-          # Try Ella/ARM spack method
+          # spack (e.g. Ella)
           if module load spack 2>/dev/null && spack load rclone 2>/dev/null && command -v rclone >/dev/null 2>&1; then
             return 0
+          fi
+          # static download fallback (any runner with outbound internet)
+          local rarch=""
+          case "$(uname -m)" in aarch64|arm64) rarch=arm64 ;; x86_64|amd64) rarch=amd64 ;; esac
+          if [ -n "$rarch" ]; then
+            local rbin="${RUNNER_TEMP:-/tmp}/rclone-bin"
+            mkdir -p "$rbin"
+            if [ ! -x "$rbin/rclone" ]; then
+              curl -fsSL "https://downloads.rclone.org/rclone-current-linux-${rarch}.zip" -o "$rbin/rclone.zip" 2>/dev/null \
+                && unzip -o -j "$rbin/rclone.zip" '*/rclone' -d "$rbin" >/dev/null 2>&1 && chmod +x "$rbin/rclone" || true
+            fi
+            export PATH="$rbin:$PATH"
+            command -v rclone >/dev/null 2>&1 && return 0
           fi
           echo "✗ rclone not available"
           return 1

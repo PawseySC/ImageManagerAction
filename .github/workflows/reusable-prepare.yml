@@ -422,12 +422,14 @@ jobs:
         if: steps.validate_manifest.outputs.proceed_valid == 'true'
         run: |
           platform="${{ steps.validate_manifest.outputs.platform }}"
+          # Generic architecture labels — any self-hosted runner of the right arch
+          # picks up the work (no per-host pinning like the old 'ella-n003').
           if [ "$platform" = "arm" ]; then
-            echo 'runner_label=["ella-n003"]' >> $GITHUB_OUTPUT
+            echo 'runner_label=["self-hosted","ARM64"]' >> $GITHUB_OUTPUT
           else
             echo 'runner_label=["self-hosted","X64"]' >> $GITHUB_OUTPUT
           fi
-          echo "Selected runner: $([ "$platform" = "arm" ] && echo "ella-n003" || echo "setonix-podman02") for platform: $platform"
+          echo "Selected runner: self-hosted/$([ "$platform" = "arm" ] && echo ARM64 || echo X64) for platform: $platform"
 
       - name: Generate date tag
         if: steps.validate_manifest.outputs.proceed_valid == 'true'
