@@ -192,14 +192,14 @@ runs:
               join("")
             ),
             image_name: (
-              # Expand ${VAR} in the user's name template from this variant's values.
+              # Expand template placeholders in the name using this variant values.
               (if ($name_tmpl | length) > 0
                then (reduce (.value | to_entries[]) as $e ($name_tmpl;
                        gsub("\\$\\{" + $e.key + "\\}"; ($e.value | tostring))))
                else "" end) as $expanded |
               if (($name_tmpl | length) > 0) and (($expanded | test("\\$\\{")) | not)
               then (
-                # Use the user's name; append any VARYING key it didn't reference so
+                # Use the name; append any VARYING key it does not reference so
                 # multi-variant builds never collide on the same name.
                 ($expanded + (
                   .value | to_entries
