@@ -1,14 +1,13 @@
 {
   "main": "unknown",
   "feature": "unknown",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "devmode": true,
   "scan": false,
   "platform": "x86",
   "shpc": false,
   "targets": [
-    "quayio-pawseysc",
-    "setonix-registry"
+    "quayio-pawseysc"
   ],
   "private-targets": [
     "liu268"
@@ -19,14 +18,11 @@
     "path": "unknown/unknown/"
   },
   "metadata": {
-    "timestamp": "2026-06-15T22:31:14.167876Z",
-    "correlation_id": "25925be3-d329-467b-9948-57b4f78d6a43"
+    "timestamp": "2026-06-15T22:47:17.652270Z",
+    "correlation_id": "48e956f4-5b76-4dde-866f-d9acead2fe78"
   },
   "template": {
-    "DEBIAN_VERSION": [
-      "stretch",
-      "buster"
-    ],
+    "DEBIAN_VERSION": "stretch",
     "CURL_ENABLED": "no"
   },
   "labels": {
