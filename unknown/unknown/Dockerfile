@@ -18,7 +18,8 @@ RUN set -eux; \
 CMD ["node", "-v"]
 LABEL org.opencontainers.image.authors="Shusen Liu"
 LABEL org.opencontainers.image.name="${DEBIAN_VERSION}-${CURL_ENABLED}"
-LABEL org.opencontainers.image.version="0.0.3"
-LABEL org.opencontainers.image.devmode="false"
-LABEL org.opencontainers.image.scan="true"
+LABEL org.opencontainers.image.noscan="true"
+LABEL org.opencontainers.image.version="0.0.4"
+LABEL org.opencontainers.image.devmode="true"
+LABEL org.opencontainers.image.scan="false"
 LABEL org.opencontainers.image.platform="x86"
