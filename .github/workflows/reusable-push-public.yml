@@ -30,6 +30,10 @@ on:
       quayio_available:
         required: true
         type: string
+      quayiosc_available:
+        required: false
+        default: 'false'
+        type: string
       setonixreg_available:
         required: true
         type: string
@@ -39,6 +43,8 @@ on:
       ACACIA_SECRET_ACCESS_KEY:
         required: true
       QUAYIO_TOKEN:
+        required: false
+      QUAYIO_SC_TOKEN:
         required: false
       SETONIXREG_PASS:
         required: false
@@ -100,6 +106,13 @@ jobs:
                 echo "[skip] Quay.io: Requested in manifest but credentials not available"
               fi
               ;;
+            "quayio-pawseysc")
+              if [ "${{ inputs.quayiosc_available }}" = "true" ]; then
+                echo "[✓] Quay.io (pawseysc): Will push to quay.io/pawseysc/${IMAGE_NAME}:${VERSION}"
+              else
+                echo "[skip] Quay.io (pawseysc): Requested in manifest but credentials not available"
+              fi
+              ;;
             "setonix-registry")
               if [ "${{ inputs.setonixreg_available }}" = "true" ]; then
                 echo "[✓] Setonix Public Registry: Will push to setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}"
@@ -115,7 +128,7 @@ jobs:
         echo ""
 
     - name: Configure podman environment
-      if: inputs.quayio_available == 'true' || inputs.setonixreg_available == 'true'
+      if: inputs.quayio_available == 'true' || inputs.quayiosc_available == 'true' || inputs.setonixreg_available == 'true'
       run: |
         echo "Setting up container environment variables for public push..."
 
@@ -145,7 +158,7 @@ jobs:
 
     - name: Download archive and load to podman
       id: locate_and_load
-      if: inputs.quayio_available == 'true' || inputs.setonixreg_available == 'true'
+      if: inputs.quayio_available == 'true' || inputs.quayiosc_available == 'true' || inputs.setonixreg_available == 'true'
       uses: ./.github/actions/setup-rclone
       with:
         access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
@@ -159,7 +172,7 @@ jobs:
         load_to_podman: true
 
     - name: Initialize Docker configuration
-      if: inputs.quayio_available == 'true' || inputs.setonixreg_available == 'true'
+      if: inputs.quayio_available == 'true' || inputs.quayiosc_available == 'true' || inputs.setonixreg_available == 'true'
       run: |
         mkdir -p ~/.docker
         echo "Created Docker config directory: ~/.docker"
@@ -215,6 +228,49 @@ jobs:
         echo "Skipping automatic visibility flip (manual / admin-only)."
 
     # ============================================
+    # Quay.io pawseysc org Push (Only if in targets)
+    # ============================================
+    - name: Push to Quay.io (pawseysc) public registry
+      id: push_quayiosc
+      # Run independently of the pawsey Quay.io result so one org failure doesn't mask the other.
+      if: always() && inputs.quayiosc_available == 'true' && contains(inputs.targets, 'quayio-pawseysc')
+      run: |
+        set -euo pipefail
+        echo "=========================================="
+        echo " Quay.io (pawseysc) Push Process"
+        echo "=========================================="
+
+        retry() {
+          local attempts="$1"; local delay="$2"; shift 2
+          local n=1
+          until "$@"; do
+            if [ "$n" -ge "$attempts" ]; then
+              echo "✗ Command failed after $n attempts: $*"
+              return 1
+            fi
+            echo "↻ Attempt $n failed; retrying in ${delay}s…"
+            sleep "$delay"
+            n=$((n+1))
+            delay=$((delay*2))
+          done
+        }
+
+        echo "🔐 Logging into Quay.io (pawseysc)..."
+        retry 3 5 podman login quay.io \
+          -u "${{ vars.QUAYIO_SC_USERNAME || vars.QUAYIO_USERNAME }}" -p "${{ secrets.QUAYIO_SC_TOKEN }}" \
+          || { echo "✗ Quay.io (pawseysc) login failed"; exit 1; }
+
+        image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
+        quayiosc_tag="quay.io/pawseysc/${IMAGE_NAME}:${VERSION}"
+        echo "🏷️  Tagging $image_tag → $quayiosc_tag"
+        podman tag "$image_tag" "$quayiosc_tag" || { echo "✗ Image tagging failed"; exit 1; }
+
+        echo "📤 Pushing to Quay.io pawseysc (with retry)…"
+        retry 4 10 podman push "$quayiosc_tag" \
+          || { echo "❌ Failed to push to Quay.io pawseysc"; exit 1; }
+        echo "✅ Pushed: $quayiosc_tag"
+
+    # ============================================
     # Setonix Public Registry Push (Only if in targets)
     # ============================================
     - name: Push to Setonix public registry
@@ -258,7 +314,7 @@ jobs:
         echo "✅ Pushed: $setonix_public_tag"
 
     - name: Clean up podman images
-      if: always() && (inputs.quayio_available == 'true' || inputs.setonixreg_available == 'true')
+      if: always() && (inputs.quayio_available == 'true' || inputs.quayiosc_available == 'true' || inputs.setonixreg_available == 'true')
       run: |
         echo "🧹 Cleaning up local images..."
         image_tag="${{ steps.locate_and_load.outputs.image_tag }}"
@@ -272,6 +328,12 @@ jobs:
           quayio_tag="quay.io/pawsey/${IMAGE_NAME}:${VERSION}"
           echo "Removing Quay.io tag: $quayio_tag"
           podman rmi "$quayio_tag" 2>/dev/null || echo "  (Quay.io tag already removed or not found)"
+        fi
+
+        if [ "${{ inputs.quayiosc_available }}" = "true" ] && echo '${{ inputs.targets }}' | jq -e 'contains(["quayio-pawseysc"])' > /dev/null; then
+          quayiosc_tag="quay.io/pawseysc/${IMAGE_NAME}:${VERSION}"
+          echo "Removing Quay.io pawseysc tag: $quayiosc_tag"
+          podman rmi "$quayiosc_tag" 2>/dev/null || echo "  (Quay.io pawseysc tag already removed or not found)"
         fi
 
         if [ "${{ inputs.setonixreg_available }}" = "true" ] && echo '${{ inputs.targets }}' | jq -e 'contains(["setonix-registry"])' > /dev/null; then

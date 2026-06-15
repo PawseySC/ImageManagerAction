@@ -61,6 +61,10 @@ on:
       quayio_available:
         required: true
         type: string
+      quayiosc_available:
+        required: false
+        default: 'false'
+        type: string
       setonixreg_available:
         required: true
         type: string
@@ -189,6 +193,20 @@ jobs:
               echo "" >> /tmp/registry_block.txt
             fi
 
+            # Quay.io pawseysc (only if in targets)
+            if echo "$targets" | jq -e 'contains(["quayio-pawseysc"])' > /dev/null 2>&1 && [ "${{ inputs.quayiosc_available }}" = "true" ]; then
+              if [ "${{ inputs.result_push_public }}" = "success" ]; then
+                echo "### Quay.io (pawseysc) Public Registry — ✅ pushed" >> /tmp/registry_block.txt
+                echo "" >> /tmp/registry_block.txt
+                while read image_name; do
+                  echo "- \`quay.io/pawseysc/${image_name}:${VERSION}\`" >> /tmp/registry_block.txt
+                done < <(echo "$matrix_json" | jq -r '.include[].image_name')
+              else
+                echo "### Quay.io (pawseysc) Public Registry — ❌ not pushed (result: \`${{ inputs.result_push_public }}\`)" >> /tmp/registry_block.txt
+              fi
+              echo "" >> /tmp/registry_block.txt
+            fi
+
             # Setonix Public (only if in targets)
             if echo "$targets" | jq -e 'contains(["setonix-registry"])' > /dev/null 2>&1 && [ "${{ inputs.setonixreg_available }}" = "true" ]; then
               if [ "${{ inputs.result_push_public }}" = "success" ]; then
@@ -233,6 +251,19 @@ jobs:
               fi
             else
               echo "| Quay.io | \`quay.io/pawsey/${IMAGE_NAME}:${VERSION}\` | ⏭️ Not in targets |" >> /tmp/registry_block.txt
+            fi
+
+            # Quay.io pawseysc (only if in targets)
+            if echo "$targets" | jq -e 'contains(["quayio-pawseysc"])' > /dev/null 2>&1; then
+              if [ "${{ inputs.quayiosc_available }}" = "true" ] && [ "${{ inputs.result_push_public }}" = "success" ]; then
+                echo "| Quay.io (pawseysc) | \`quay.io/pawseysc/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |" >> /tmp/registry_block.txt
+              elif [ "${{ inputs.quayiosc_available }}" = "true" ]; then
+                echo "| Quay.io (pawseysc) | \`quay.io/pawseysc/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |" >> /tmp/registry_block.txt
+              else
+                echo "| Quay.io (pawseysc) | \`quay.io/pawseysc/${IMAGE_NAME}:${VERSION}\` | ⏭️ Skipped (No credentials) |" >> /tmp/registry_block.txt
+              fi
+            else
+              echo "| Quay.io (pawseysc) | \`quay.io/pawseysc/${IMAGE_NAME}:${VERSION}\` | ⏭️ Not in targets |" >> /tmp/registry_block.txt
             fi
 
             # Setonix Public Registry (only if in targets)
@@ -472,6 +503,7 @@ jobs:
           ACACIA_BUCKET: ${{ inputs.acacia_bucket }}
           ACACIA_SIF_BUCKET: ${{ inputs.acacia_sif_bucket }}
           QUAYIO_AVAILABLE: ${{ inputs.quayio_available }}
+          QUAYIOSC_AVAILABLE: ${{ inputs.quayiosc_available }}
           SETONIXREG_AVAILABLE: ${{ inputs.setonixreg_available }}
           RESULT_PREPARE: ${{ inputs.result_prepare }}
           RESULT_BUILD: ${{ inputs.result_build }}
@@ -502,6 +534,7 @@ jobs:
 
           # Per-registry result (mirrors the markdown registry block logic).
           quay_in=no;  echo "$TARGETS" | jq -e 'contains(["quay.io"])'         >/dev/null 2>&1 && quay_in=yes
+          quaysc_in=no; echo "$TARGETS" | jq -e 'contains(["quayio-pawseysc"])' >/dev/null 2>&1 && quaysc_in=yes
           setpub_in=no; echo "$TARGETS" | jq -e 'contains(["setonix-registry"])' >/dev/null 2>&1 && setpub_in=yes
 
           priv_result="skipped"
@@ -512,6 +545,12 @@ jobs:
           if [ "$quay_in" = "yes" ]; then
             if [ "$QUAYIO_AVAILABLE" = "true" ] && [ "$RESULT_PUSH_PUBLIC" = "success" ]; then quay_result="success"
             elif [ "$QUAYIO_AVAILABLE" = "true" ]; then quay_result="failed"; else quay_result="skipped"; fi
+          fi
+
+          quaysc_result="not_in_targets"
+          if [ "$quaysc_in" = "yes" ]; then
+            if [ "$QUAYIOSC_AVAILABLE" = "true" ] && [ "$RESULT_PUSH_PUBLIC" = "success" ]; then quaysc_result="success"
+            elif [ "$QUAYIOSC_AVAILABLE" = "true" ]; then quaysc_result="failed"; else quaysc_result="skipped"; fi
           fi
 
           setpub_result="not_in_targets"
@@ -528,7 +567,7 @@ jobs:
               --arg dbucket "$ACACIA_BUCKET" --arg sbucket "$ACACIA_SIF_BUCKET" \
               --arg puser "$PRIVATE_USER" \
               --arg rb "$RESULT_BUILD" \
-              --arg priv "$priv_result" --arg quay "$quay_result" --arg setpub "$setpub_result" \
+              --arg priv "$priv_result" --arg quay "$quay_result" --arg quaysc "$quaysc_result" --arg setpub "$setpub_result" \
               '{
                 image_name: $img,
                 archives: {
@@ -539,6 +578,7 @@ jobs:
                 images: [
                   {registry:"Setonix (private)", ref:("setonix-registry.pawsey.org.au/" + $puser + "/" + $img + ":" + $ver), result:$priv},
                   {registry:"Quay.io",           ref:("quay.io/pawsey/" + $img + ":" + $ver),                                result:$quay},
+                  {registry:"Quay.io (pawseysc)",ref:("quay.io/pawseysc/" + $img + ":" + $ver),                              result:$quaysc},
                   {registry:"Setonix (public)",  ref:("setonix-registry.pawsey.org.au/pawsey/" + $img + ":" + $ver),         result:$setpub}
                 ]
               }')

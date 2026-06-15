@@ -102,6 +102,7 @@ jobs:
       needs.PREPARE.outputs.proceed_valid == 'true' &&
       (
         (contains(needs.PREPARE.outputs.targets, 'quay.io') && needs.PREPARE.outputs.quayio_available == 'true') ||
+        (contains(needs.PREPARE.outputs.targets, 'quayio-pawseysc') && needs.PREPARE.outputs.quayiosc_available == 'true') ||
         (contains(needs.PREPARE.outputs.targets, 'setonix-registry') && needs.PREPARE.outputs.setonixreg_available == 'true')
       )
     uses: ./.github/workflows/reusable-push-public.yml
@@ -115,6 +116,7 @@ jobs:
       targets: ${{ needs.PREPARE.outputs.targets }}
       devmode: ${{ needs.PREPARE.outputs.devmode }}
       quayio_available: ${{ needs.PREPARE.outputs.quayio_available }}
+      quayiosc_available: ${{ needs.PREPARE.outputs.quayiosc_available }}
       setonixreg_available: ${{ needs.PREPARE.outputs.setonixreg_available }}
     secrets: inherit
 
@@ -233,6 +235,7 @@ jobs:
       targets: ${{ needs.PREPARE.outputs.targets }}
       private_targets: ${{ needs.PREPARE.outputs.private_targets }}
       quayio_available: ${{ needs.PREPARE.outputs.quayio_available }}
+      quayiosc_available: ${{ needs.PREPARE.outputs.quayiosc_available }}
       setonixreg_available: ${{ needs.PREPARE.outputs.setonixreg_available }}
       acacia_bucket: ${{ vars.ACACIA_BUCKETNAME }}
       acacia_sif_bucket: ${{ vars.ACACIA_SIF_BUCKETNAME }}

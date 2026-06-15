@@ -9,6 +9,8 @@ on:
         required: false
       QUAYIO_TOKEN:
         required: false
+      QUAYIO_SC_TOKEN:
+        required: false
       SETONIXREG_PASS:
         required: false
       ACACIA_ACCESS_KEY_ID:
@@ -67,6 +69,9 @@ on:
       quayio_available:
         description: "Whether Quay.io credentials are available"
         value: ${{ jobs.prepare.outputs.quayio_available }}
+      quayiosc_available:
+        description: "Whether Quay.io (pawseysc org) credentials are available"
+        value: ${{ jobs.prepare.outputs.quayiosc_available }}
       setonixreg_available:
         description: "Whether Setonix Registry credentials are available"
         value: ${{ jobs.prepare.outputs.setonixreg_available }}
@@ -104,6 +109,7 @@ jobs:
       date: ${{ steps.date.outputs.date }}
       dockerhub_available: ${{ steps.check_vars_secrets.outputs.dockerhub_available }}
       quayio_available: ${{ steps.check_vars_secrets.outputs.quayio_available }}
+      quayiosc_available: ${{ steps.check_vars_secrets.outputs.quayiosc_available }}
       setonixreg_available: ${{ steps.check_vars_secrets.outputs.setonixreg_available }}
       build_matrix: ${{ steps.process_template.outputs.matrix }}
       has_template: ${{ steps.process_template.outputs.has_template }}
@@ -184,10 +190,15 @@ jobs:
           # Set output flags for conditional job execution
           dockerhub_available=$( [ -n "${{ vars.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ] && echo 'true' || echo 'false' )
           quayio_available=$( [ -n "${{ vars.QUAYIO_USERNAME }}" ] && [ -n "${{ secrets.QUAYIO_TOKEN }}" ] && echo 'true' || echo 'false' )
+          # pawseysc org on quay.io uses a separate push token (QUAYIO_SC_TOKEN);
+          # the login username falls back to QUAYIO_USERNAME when the optional
+          # QUAYIO_SC_USERNAME var isn't set (same account, different-scoped token).
+          quayiosc_available=$( [ -n "${{ secrets.QUAYIO_SC_TOKEN }}" ] && { [ -n "${{ vars.QUAYIO_SC_USERNAME }}" ] || [ -n "${{ vars.QUAYIO_USERNAME }}" ]; } && echo 'true' || echo 'false' )
           setonixreg_available=$( [ -n "${{ vars.SETONIXREG_USERNAME }}" ] && [ -n "${{ secrets.SETONIXREG_PASS }}" ] && echo 'true' || echo 'false' )
 
           echo "dockerhub_available=$dockerhub_available" >> $GITHUB_OUTPUT
           echo "quayio_available=$quayio_available" >> $GITHUB_OUTPUT
+          echo "quayiosc_available=$quayiosc_available" >> $GITHUB_OUTPUT
           echo "setonixreg_available=$setonixreg_available" >> $GITHUB_OUTPUT
 
           # Log registry availability status
@@ -203,6 +214,12 @@ jobs:
             echo "[✓] Quay.io: Credentials available"
           else
             echo "[✗] Quay.io: Missing credentials (QUAYIO_USERNAME or QUAYIO_TOKEN)"
+          fi
+
+          if [ "$quayiosc_available" = "true" ]; then
+            echo "[✓] Quay.io (pawseysc): Credentials available"
+          else
+            echo "[✗] Quay.io (pawseysc): Missing credentials (QUAYIO_SC_TOKEN)"
           fi
 
           if [ "$setonixreg_available" = "true" ]; then
