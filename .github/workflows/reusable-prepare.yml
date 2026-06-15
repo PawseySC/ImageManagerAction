@@ -283,36 +283,31 @@ jobs:
             exit 0
           fi
 
-          # Find Dockerfile with case-insensitive search and various extensions
+          # Find the Dockerfile. Space/paren-safe: the multi-file uploader keeps
+          # each file's ORIGINAL name, which can contain spaces or parens (e.g. a
+          # browser-duplicated "build (2).dockerfile"). The previous glob loop
+          # word-split such names on whitespace and missed the file. We instead
+          # match exact Dockerfile/dockerfile first, then any *.dockerfile via
+          # `find -iname` (covers *.Dockerfile too) read one line at a time.
           dockerfile_found=""
-          dockerfile_patterns=(
-            "${branch_path}/Dockerfile"
-            "${branch_path}/dockerfile"
-            "${branch_path}/"*.dockerfile
-            "${branch_path}/"*.Dockerfile
-            "${branch_path}/"*.[Dd]ockerfile
-          )
-
-          echo "Searching for Dockerfile with patterns:"
-          for pattern in "${dockerfile_patterns[@]}"; do
-            echo "  - $pattern"
-            for file in $pattern; do
-              if [ -f "$file" ]; then
-                dockerfile_found="$file"
-                echo "✓ Found Dockerfile: $dockerfile_found"
-                break 2
-              fi
-            done
+          for cand in "${branch_path}/Dockerfile" "${branch_path}/dockerfile"; do
+            if [ -f "$cand" ]; then dockerfile_found="$cand"; break; fi
           done
+          if [ -z "$dockerfile_found" ]; then
+            while IFS= read -r f; do dockerfile_found="$f"; break; done < <(
+              find "$branch_path" -maxdepth 1 -type f -iname '*.dockerfile' | sort
+            )
+          fi
 
           # Check if any Dockerfile variant was found
           if [ -z "$dockerfile_found" ]; then
             echo "Error: No Dockerfile found in $branch_path"
-            echo "Searched for: Dockerfile, dockerfile, *.dockerfile, *.Dockerfile, *.[Dd]ockerfile"
+            echo "Searched for: Dockerfile, dockerfile, *.dockerfile, *.Dockerfile"
             echo "This workflow requires a Dockerfile in the branch directory."
             echo "proceed_valid=false" >> $GITHUB_OUTPUT
             exit 0
           fi
+          echo "✓ Found Dockerfile: $dockerfile_found"
 
           dockerfile_path="$dockerfile_found"
           echo "Using Dockerfile: $dockerfile_path"
