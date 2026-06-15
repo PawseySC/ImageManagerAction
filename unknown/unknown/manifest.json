@@ -1,12 +1,15 @@
 {
   "main": "unknown",
   "feature": "unknown",
-  "version": "0.0.3",
-  "devmode": false,
-  "scan": true,
+  "version": "0.0.4",
+  "devmode": true,
+  "scan": false,
   "platform": "x86",
   "shpc": false,
-  "targets": [],
+  "targets": [
+    "quayio-pawseysc",
+    "setonix-registry"
+  ],
   "private-targets": [
     "liu268"
   ],
@@ -16,15 +19,19 @@
     "path": "unknown/unknown/"
   },
   "metadata": {
-    "timestamp": "2026-06-15T11:03:09.379078Z",
-    "correlation_id": "42ea18c4-af94-4311-8b0f-419f10efad3c"
+    "timestamp": "2026-06-15T22:31:14.167876Z",
+    "correlation_id": "25925be3-d329-467b-9948-57b4f78d6a43"
   },
   "template": {
-    "DEBIAN_VERSION": "stretch",
+    "DEBIAN_VERSION": [
+      "stretch",
+      "buster"
+    ],
     "CURL_ENABLED": "no"
   },
   "labels": {
     "org.opencontainers.image.authors": "Shusen Liu",
-    "org.opencontainers.image.name": "${DEBIAN_VERSION}-${CURL_ENABLED}"
+    "org.opencontainers.image.name": "${DEBIAN_VERSION}-${CURL_ENABLED}",
+    "org.opencontainers.image.noscan": "true"
   }
 }
