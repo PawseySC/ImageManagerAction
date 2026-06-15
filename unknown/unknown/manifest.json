@@ -1,7 +1,7 @@
 {
   "main": "unknown",
   "feature": "unknown",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "devmode": false,
   "scan": true,
   "platform": "x86",
@@ -16,8 +16,8 @@
     "path": "unknown/unknown/"
   },
   "metadata": {
-    "timestamp": "2026-06-15T10:48:58.332522Z",
-    "correlation_id": "2c556199-4906-47d4-89ab-9a8a5b40f063"
+    "timestamp": "2026-06-15T11:03:09.379078Z",
+    "correlation_id": "42ea18c4-af94-4311-8b0f-419f10efad3c"
   },
   "template": {
     "DEBIAN_VERSION": "stretch",
