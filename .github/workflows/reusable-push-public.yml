@@ -56,17 +56,17 @@ jobs:
     strategy:
       matrix: ${{ fromJson(inputs.build_matrix) }}
       fail-fast: false
-    # Public-registry pushes ALWAYS require the `manual_approval` environment.
-    # Previously this was selectable via attacker-controlled `devmode` /
-    # `targets` form fields; setting `devmode=true` bypassed the gate. The
-    # decision of whether a push needs human review must not be derived from
-    # data the uploader controls.
+    # Public-registry pushes require the `manual_approval` environment, EXCEPT
+    # when devmode is set — then the job routes to the unprotected `development`
+    # environment so dev/test builds proceed without a human gate.
     #
-    # If you want a fast lane for trusted users, gate it on a workflow input
-    # that's bound to a server-only signal (a deploy-key-only tag, a label
-    # set by an authenticated admin endpoint, etc.) — never the manifest.
+    # NOTE: devmode comes from the uploaded manifest, so anyone who can upload
+    # (the web UI sits behind Cloudflare Access) can skip public-push review by
+    # enabling dev mode. This is an intentional owner decision. If uploads ever
+    # become untrusted, bind the fast lane to a server-only signal (a
+    # deploy-key-only tag, an admin-set label, etc.) instead of the manifest.
     environment:
-      name: manual_approval
+      name: ${{ inputs.devmode == 'true' && 'development' || 'manual_approval' }}
     env:
       VERSION: ${{ inputs.version }}
       TARGETS: ${{ inputs.targets }}
