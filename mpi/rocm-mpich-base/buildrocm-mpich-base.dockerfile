@@ -15,15 +15,6 @@ ARG MPI4PY_VERSION="3.1.5"
 
 
 #define some metadata 
-LABEL org.opencontainers.image.created="2025-06"
-LABEL org.opencontainers.image.authors="Cristian Di Pietratonio <cristian.dipietrantonio@pawsey.org.au>, Pascal Elahi <pascal.elahi@pawsey.org.au>, Craig Meyer <cmeyer@pawsey.org.au>"
-LABEL org.opencontainers.image.documentation="https://github.com/PawseySC/pawsey-containers/"
-LABEL org.opencontainers.image.source="https://github.com/PawseySC/pawsey-containers/mpi/mpich-base/buildmpich.dockerfile"
-LABEL org.opencontainers.image.vendor="Pawsey Supercomputing Research Centre"
-LABEL org.opencontainers.image.licenses="GNU GPL3.0"
-LABEL org.opencontainers.image.title="Setonix compatible MPICH + ROCM base"
-LABEL org.opencontainers.image.description="Common base image providing mpi + rocm compatible with cray-mpich used on Setonix"
-LABEL org.opencontainers.image.base.name="pawsey/mpibase:ubuntu${OS_VERSION}-mpich-${MPICH_VERSION}.setonix"
 
 # Install required packages and dependencies
 #CMEYER: Newer kernel for ubuntu24.04 instead of 5.15.0-91
@@ -306,3 +297,17 @@ RUN echo "export NCCL_SOCKET_IFNAME=hsn"  >> /.singularity.d/env/91-environment.
 # and copy the recipe into the docker recipes directory
 RUN mkdir -p /opt/docker-recipes/
 COPY buildrocm-mpich-base.dockerfile /opt/docker-recipes/
+LABEL org.opencontainers.image.authors="Cristian Di Pietratonio <cristian.dipietrantonio@pawsey.org.au>, Pascal Elahi <pascal.elahi@pawsey.org.au>, Craig Meyer <cmeyer@pawsey.org.au>"
+LABEL org.opencontainers.image.name="ubuntu${OS_VERSION}-mpich${MPICH_VERSION}-rocm${ROCM_VERSION}"
+LABEL org.opencontainers.image.created="2025-06"
+LABEL org.opencontainers.image.documentation="https://github.com/PawseySC/pawsey-containers/"
+LABEL org.opencontainers.image.source="https://github.com/PawseySC/pawsey-containers/mpi/mpich-base/buildmpich.dockerfile"
+LABEL org.opencontainers.image.vendor="Pawsey Supercomputing Research Centre"
+LABEL org.opencontainers.image.licenses="GNU GPL3.0"
+LABEL org.opencontainers.image.title="Setonix compatible MPICH + ROCM base"
+LABEL org.opencontainers.image.description="Common base image providing mpi + rocm compatible with cray-mpich used on Setonix"
+LABEL org.opencontainers.image.base.name="pawsey/mpibase:ubuntu${OS_VERSION}-mpich-${MPICH_VERSION}.setonix"
+LABEL org.opencontainers.image.version="0.0.4"
+LABEL org.opencontainers.image.devmode="true"
+LABEL org.opencontainers.image.scan="false"
+LABEL org.opencontainers.image.platform="x86"
