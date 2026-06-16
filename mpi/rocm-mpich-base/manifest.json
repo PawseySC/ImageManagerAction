@@ -1,7 +1,7 @@
 {
   "main": "mpi",
   "feature": "rocm-mpich-base",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "devmode": true,
   "scan": false,
   "platform": "x86",
@@ -19,8 +19,8 @@
     "path": "mpi/rocm-mpich-base/"
   },
   "metadata": {
-    "timestamp": "2026-06-15T23:14:05.504920Z",
-    "correlation_id": "adbba814-71e3-4b73-a452-a960d232c5f4"
+    "timestamp": "2026-06-16T02:34:08.283026Z",
+    "correlation_id": "3435da33-89d9-444b-9e9c-49a064647c58"
   },
   "template": {
     "OS_VERSION": "24.04",
@@ -40,7 +40,7 @@
   },
   "labels": {
     "org.opencontainers.image.authors": "Cristian Di Pietratonio <cristian.dipietrantonio@pawsey.org.au>, Pascal Elahi <pascal.elahi@pawsey.org.au>, Craig Meyer <cmeyer@pawsey.org.au>",
-    "org.opencontainers.image.name": "ubuntu${OS_VERSION}-mpi${MPICH_VERSION}",
+    "org.opencontainers.image.name": "ubuntu${OS_VERSION}-mpich${MPICH_VERSION}-rocm${ROCM_VERSION}",
     "org.opencontainers.image.created": "2025-06",
     "org.opencontainers.image.documentation": "https://github.com/PawseySC/pawsey-containers/",
     "org.opencontainers.image.source": "https://github.com/PawseySC/pawsey-containers/mpi/mpich-base/buildmpich.dockerfile",
