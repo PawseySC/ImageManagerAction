@@ -1,0 +1,126 @@
+name: Sync — import external image
+
+# Triggered (workflow_dispatch) by ImageManagerWeb's "Sync external image" form.
+# Takes an existing quay.io/pawseysc/<repo>:<version> image and: mirrors it to the
+# Setonix registry (pawsey namespace), saves a .tar and builds a .sif, and uploads
+# both to Acacia — so an externally-built image lands in our catalog + infra. Runs
+# on a self-hosted X64 runner (reaches the internal registry + has podman/singularity).
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Source image (quay.io/pawseysc/<repo>:<version>)'
+        required: true
+        type: string
+      image_name:
+        description: 'Repo name, no registry/tag (e.g. nvidia-pytorch-...)'
+        required: true
+        type: string
+      version:
+        description: 'Version tag (X.Y.Z)'
+        required: true
+        type: string
+
+jobs:
+  sync:
+    runs-on: [self-hosted, X64]
+    timeout-minutes: 90
+    env:
+      SOURCE_REF: ${{ inputs.source_ref }}
+      IMAGE_NAME: ${{ inputs.image_name }}
+      VERSION: ${{ inputs.version }}
+      QUAY_SC_USER: ${{ vars.QUAYIO_SC_USERNAME }}
+      QUAY_SC_TOKEN: ${{ secrets.QUAYIO_SC_TOKEN }}
+      SETONIX_USER: ${{ vars.SETONIXREG_USERNAME }}
+      SETONIX_PASS: ${{ secrets.SETONIXREG_PASS }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Mirror to Setonix (pawsey) + save TAR
+        id: mirror
+        run: |
+          set -euo pipefail
+
+          # Per-runner rootless-podman isolation (same scheme as the build/push jobs).
+          RID=$(printf '%s' "${RUNNER_NAME:-default}" | sha1sum | cut -c1-12)
+          export XDG_DATA_HOME=/container/${USER}/data-${RID}
+          export XDG_RUNTIME_DIR=/container/${USER}/runtime-${RID}
+          export TMPDIR=/container/${USER}/tmp-${RID}/
+          mkdir -p "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR" "$TMPDIR"
+
+          SETONIX_REF="setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}"
+          TAR="${IMAGE_NAME}_${VERSION}.tar"
+          SIF="${IMAGE_NAME}_${VERSION}.sif"
+          echo "Source:  docker://${SOURCE_REF}"
+          echo "Setonix: docker://${SETONIX_REF}"
+
+          retry() { local n=1; until "$@"; do [ "$n" -ge 3 ] && return 1; echo "retry $n…"; sleep $((5*n)); n=$((n+1)); done; }
+
+          retry podman login quay.io -u "$QUAY_SC_USER" -p "$QUAY_SC_TOKEN"
+          retry podman login https://setonix-registry.pawsey.org.au -u "$SETONIX_USER" -p "$SETONIX_PASS"
+
+          echo "Pulling source (linux/amd64)…"
+          retry podman pull --platform linux/amd64 "docker://${SOURCE_REF}"
+
+          echo "Pushing to Setonix…"
+          podman tag "${SOURCE_REF}" "${SETONIX_REF}"
+          retry podman push "${SETONIX_REF}"
+
+          echo "Saving docker-archive TAR…"
+          podman save --format docker-archive "${SOURCE_REF}" -o "${TAR}"
+          ls -lh "${TAR}"
+
+          echo "tar=${TAR}" >> "$GITHUB_OUTPUT"
+          echo "sif=${SIF}" >> "$GITHUB_OUTPUT"
+          echo "setonix_ref=${SETONIX_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload TAR to Acacia
+        uses: ./.github/actions/setup-rclone
+        with:
+          access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+          secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+          endpoint: https://projects.pawsey.org.au
+          bucket: ${{ vars.ACACIA_BUCKETNAME }}
+          destination_path: ""
+          upload_mode: 'true'
+          upload_file: ${{ steps.mirror.outputs.tar }}
+          upload_file_type: 'archive'
+
+      - name: Build SIF from the TAR
+        id: sif
+        run: |
+          set -euo pipefail
+          TAR="${{ steps.mirror.outputs.tar }}"
+          SIF="${{ steps.mirror.outputs.sif }}"
+          if command -v singularity >/dev/null 2>&1; then :
+          elif module load singularity/4.1.0 2>/dev/null && command -v singularity >/dev/null 2>&1; then :
+          else echo "Singularity unavailable (PATH / module singularity/4.1.0)"; exit 1; fi
+          singularity --version
+          export MKSQUASHFS_PROCESSORS="$(nproc)" MKSQUASHFS_MEM="80%" MKSQUASHFS_COMP="zstd" MKSQUASHFS_COMP_OPTS="-Xcompression-level 3"
+          singularity build --force "$SIF" "docker-archive://$TAR"
+          ls -lh "$SIF"
+
+      - name: Upload SIF to Acacia
+        uses: ./.github/actions/setup-rclone
+        with:
+          access_key_id: ${{ secrets.ACACIA_ACCESS_KEY_ID }}
+          secret_access_key: ${{ secrets.ACACIA_SECRET_ACCESS_KEY }}
+          endpoint: https://projects.pawsey.org.au
+          bucket: ${{ vars.ACACIA_SIF_BUCKETNAME }}
+          destination_path: ""
+          upload_mode: 'true'
+          upload_file: ${{ steps.mirror.outputs.sif }}
+          upload_file_type: 'sif'
+
+      - name: Cleanup local artifacts
+        if: always()
+        run: |
+          RID=$(printf '%s' "${RUNNER_NAME:-default}" | sha1sum | cut -c1-12)
+          export XDG_DATA_HOME=/container/${USER}/data-${RID} XDG_RUNTIME_DIR=/container/${USER}/runtime-${RID} TMPDIR=/container/${USER}/tmp-${RID}/
+          podman rmi "${SOURCE_REF}" "${{ steps.mirror.outputs.setonix_ref }}" 2>/dev/null || true
+          rm -f "${{ steps.mirror.outputs.tar }}" "${{ steps.mirror.outputs.sif }}" 2>/dev/null || true
+          echo "## Image sync"            >> "$GITHUB_STEP_SUMMARY"
+          echo "- source: \`${SOURCE_REF}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- setonix: \`${{ steps.mirror.outputs.setonix_ref }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tar/sif: \`${IMAGE_NAME}_${VERSION}.{tar,sif}\` → Acacia" >> "$GITHUB_STEP_SUMMARY"
