@@ -1,10 +1,9 @@
 name: Cleanup — delete registry images
 
 # Triggered (workflow_dispatch) by ImageManagerWeb when a catalog tag / feature /
-# main is deleted in the admin UI. skopeo-deletes the given image refs from
-# quay.io (pawsey + pawseysc) and the Setonix registry (public + private).
-# Best-effort + idempotent: a ref that is already gone counts as deleted, and an
-# individual failure never fails the job.
+# main is deleted. skopeo-deletes the given image refs. Quay.io is public, so it
+# runs on a GitHub-hosted runner; the Setonix registry is only reachable from
+# inside Pawsey, so it runs on the self-hosted runner. Best-effort + idempotent.
 
 on:
   workflow_dispatch:
@@ -15,11 +14,13 @@ on:
         type: string
 
 jobs:
-  cleanup:
+  # ---------------------------------------------------- Quay.io (public, GH-hosted)
+  quay:
+    if: contains(inputs.refs, 'quay.io/')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Delete registry images via skopeo
+      - name: Delete Quay.io images via skopeo
         shell: bash
         env:
           REFS_JSON: ${{ inputs.refs }}
@@ -27,34 +28,22 @@ jobs:
           QUAY_TOKEN: ${{ secrets.QUAYIO_TOKEN }}
           QUAY_SC_USER: ${{ vars.QUAYIO_SC_USERNAME }}
           QUAY_SC_TOKEN: ${{ secrets.QUAYIO_SC_TOKEN }}
-          SETONIX_USER: ${{ vars.SETONIXREG_USERNAME }}
-          SETONIX_PASS: ${{ secrets.SETONIXREG_PASS }}
         run: |
           set -uo pipefail
-
           command -v skopeo >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq skopeo; }
 
-          total=$(echo "$REFS_JSON" | jq 'length' 2>/dev/null || echo 0)
-          echo "Requested deletion of ${total} image ref(s)."
-          deleted=0; gone=0; failed=0; skipped=0
-
-          # Pick "user:pass" for the registry/namespace of a ref. pawseysc must be
-          # matched before the generic pawsey case.
           creds_for() {
             case "$1" in
-              quay.io/pawseysc/*)                 printf '%s:%s' "$QUAY_SC_USER" "$QUAY_SC_TOKEN" ;;
-              quay.io/pawsey/*)                   printf '%s:%s' "$QUAY_USER" "$QUAY_TOKEN" ;;
-              setonix-registry.pawsey.org.au/*)   printf '%s:%s' "$SETONIX_USER" "$SETONIX_PASS" ;;
-              *)                                   printf '' ;;
+              quay.io/pawseysc/*) printf '%s:%s' "$QUAY_SC_USER" "$QUAY_SC_TOKEN" ;;
+              quay.io/pawsey/*)   printf '%s:%s' "$QUAY_USER" "$QUAY_TOKEN" ;;
+              *)                  printf '' ;;
             esac
           }
 
+          deleted=0; gone=0; failed=0
           while IFS= read -r ref; do
             [ -z "$ref" ] && continue
-            creds=$(creds_for "$ref")
-            if [ -z "${creds#:}" ] || [ -z "$creds" ]; then
-              echo "skip (unknown registry / missing creds): $ref"; skipped=$((skipped+1)); continue
-            fi
+            creds=$(creds_for "$ref"); [ -z "$creds" ] && continue
             echo "Deleting: $ref"
             if out=$(skopeo delete --creds "$creds" "docker://$ref" 2>&1); then
               echo "  deleted"; deleted=$((deleted+1))
@@ -63,15 +52,57 @@ jobs:
             else
               echo "  FAILED: $out"; failed=$((failed+1))
             fi
-          done < <(echo "$REFS_JSON" | jq -r '.[]?')
+          done < <(echo "$REFS_JSON" | jq -r '.[]? | select(startswith("quay.io/"))')
 
-          {
-            echo "## Registry cleanup"
-            echo "- deleted: ${deleted}"
-            echo "- already gone: ${gone}"
-            echo "- skipped (unknown registry): ${skipped}"
-            echo "- failed: ${failed}"
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "Done. deleted=${deleted} already-gone=${gone} skipped=${skipped} failed=${failed}"
-          # Best-effort: never fail the job on individual delete errors.
+          { echo "## Quay.io cleanup"; echo "- deleted: ${deleted}"; echo "- already gone: ${gone}"; echo "- failed: ${failed}"; } >> "$GITHUB_STEP_SUMMARY"
+          echo "Quay: deleted=${deleted} already-gone=${gone} failed=${failed}"
+          exit 0
+
+  # ---------------------------------------- Setonix registry (internal, self-hosted)
+  setonix:
+    if: contains(inputs.refs, 'setonix-registry.pawsey.org.au/')
+    runs-on: [self-hosted, X64]
+    timeout-minutes: 20
+    steps:
+      - name: Delete Setonix registry images via skopeo
+        shell: bash
+        env:
+          REFS_JSON: ${{ inputs.refs }}
+          SETONIX_USER: ${{ vars.SETONIXREG_USERNAME }}
+          SETONIX_PASS: ${{ secrets.SETONIXREG_PASS }}
+        run: |
+          set -uo pipefail
+
+          # skopeo: native (PATH or Setonix/Ella module) → else run it via podman
+          # (the runner always has podman). --network=host so the skopeo container
+          # reaches the internal registry exactly as the host does.
+          SKOPEO=""
+          command -v skopeo >/dev/null 2>&1 && SKOPEO="skopeo"
+          if [ -z "$SKOPEO" ]; then module load skopeo 2>/dev/null && command -v skopeo >/dev/null 2>&1 && SKOPEO="skopeo"; fi
+          if [ -z "$SKOPEO" ] && command -v podman >/dev/null 2>&1; then
+            RID=$(printf '%s' "${RUNNER_NAME:-default}" | sha1sum | cut -c1-12)
+            export XDG_DATA_HOME="/container/${USER}/data-${RID}"
+            export XDG_RUNTIME_DIR="/container/${USER}/runtime-${RID}"
+            export TMPDIR="/container/${USER}/tmp-${RID}/"
+            mkdir -p "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR" "$TMPDIR"
+            SKOPEO="podman run --rm --network=host quay.io/skopeo/stable:latest"
+          fi
+          if [ -z "$SKOPEO" ]; then echo "skopeo/podman unavailable on this runner"; exit 0; fi
+          echo "Using: $SKOPEO"
+
+          deleted=0; gone=0; failed=0
+          while IFS= read -r ref; do
+            [ -z "$ref" ] && continue
+            echo "Deleting: $ref"
+            if out=$($SKOPEO delete --creds "${SETONIX_USER}:${SETONIX_PASS}" "docker://$ref" 2>&1); then
+              echo "  deleted"; deleted=$((deleted+1))
+            elif echo "$out" | grep -qiE "manifest unknown|not found|404|name unknown|does not exist|no such"; then
+              echo "  already gone (idempotent)"; gone=$((gone+1))
+            else
+              echo "  FAILED: $out"; failed=$((failed+1))
+            fi
+          done < <(echo "$REFS_JSON" | jq -r '.[]? | select(startswith("setonix-registry.pawsey.org.au/"))')
+
+          { echo "## Setonix registry cleanup"; echo "- deleted: ${deleted}"; echo "- already gone: ${gone}"; echo "- failed: ${failed}"; } >> "$GITHUB_STEP_SUMMARY"
+          echo "Setonix: deleted=${deleted} already-gone=${gone} failed=${failed}"
           exit 0
