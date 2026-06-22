@@ -1,0 +1,77 @@
+name: Cleanup — delete registry images
+
+# Triggered (workflow_dispatch) by ImageManagerWeb when a catalog tag / feature /
+# main is deleted in the admin UI. skopeo-deletes the given image refs from
+# quay.io (pawsey + pawseysc) and the Setonix registry (public + private).
+# Best-effort + idempotent: a ref that is already gone counts as deleted, and an
+# individual failure never fails the job.
+
+on:
+  workflow_dispatch:
+    inputs:
+      refs:
+        description: 'JSON array of image refs to delete (e.g. ["quay.io/pawsey/x:1.0-x86"])'
+        required: true
+        type: string
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Delete registry images via skopeo
+        shell: bash
+        env:
+          REFS_JSON: ${{ inputs.refs }}
+          QUAY_USER: ${{ vars.QUAYIO_USERNAME }}
+          QUAY_TOKEN: ${{ secrets.QUAYIO_TOKEN }}
+          QUAY_SC_USER: ${{ vars.QUAYIO_SC_USERNAME }}
+          QUAY_SC_TOKEN: ${{ secrets.QUAYIO_SC_TOKEN }}
+          SETONIX_USER: ${{ vars.SETONIXREG_USERNAME }}
+          SETONIX_PASS: ${{ secrets.SETONIXREG_PASS }}
+        run: |
+          set -uo pipefail
+
+          command -v skopeo >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq skopeo; }
+
+          total=$(echo "$REFS_JSON" | jq 'length' 2>/dev/null || echo 0)
+          echo "Requested deletion of ${total} image ref(s)."
+          deleted=0; gone=0; failed=0; skipped=0
+
+          # Pick "user:pass" for the registry/namespace of a ref. pawseysc must be
+          # matched before the generic pawsey case.
+          creds_for() {
+            case "$1" in
+              quay.io/pawseysc/*)                 printf '%s:%s' "$QUAY_SC_USER" "$QUAY_SC_TOKEN" ;;
+              quay.io/pawsey/*)                   printf '%s:%s' "$QUAY_USER" "$QUAY_TOKEN" ;;
+              setonix-registry.pawsey.org.au/*)   printf '%s:%s' "$SETONIX_USER" "$SETONIX_PASS" ;;
+              *)                                   printf '' ;;
+            esac
+          }
+
+          while IFS= read -r ref; do
+            [ -z "$ref" ] && continue
+            creds=$(creds_for "$ref")
+            if [ -z "${creds#:}" ] || [ -z "$creds" ]; then
+              echo "skip (unknown registry / missing creds): $ref"; skipped=$((skipped+1)); continue
+            fi
+            echo "Deleting: $ref"
+            if out=$(skopeo delete --creds "$creds" "docker://$ref" 2>&1); then
+              echo "  deleted"; deleted=$((deleted+1))
+            elif echo "$out" | grep -qiE "manifest unknown|not found|404|name unknown|does not exist|no such"; then
+              echo "  already gone (idempotent)"; gone=$((gone+1))
+            else
+              echo "  FAILED: $out"; failed=$((failed+1))
+            fi
+          done < <(echo "$REFS_JSON" | jq -r '.[]?')
+
+          {
+            echo "## Registry cleanup"
+            echo "- deleted: ${deleted}"
+            echo "- already gone: ${gone}"
+            echo "- skipped (unknown registry): ${skipped}"
+            echo "- failed: ${failed}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Done. deleted=${deleted} already-gone=${gone} skipped=${skipped} failed=${failed}"
+          # Best-effort: never fail the job on individual delete errors.
+          exit 0
