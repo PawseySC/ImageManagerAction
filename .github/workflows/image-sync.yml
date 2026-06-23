@@ -59,10 +59,11 @@ jobs:
           export TMPDIR=/container/${USER}/tmp-${RID}/
           mkdir -p "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR" "$TMPDIR"
 
-          TAG="${VERSION}-${PLATFORM}"
-          SETONIX_REF="setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${TAG}"
-          TAR="${IMAGE_NAME}_${TAG}.tar"
-          SIF="${IMAGE_NAME}_${TAG}.sif"
+          # Convention: arch goes in the image NAME (…-x86 / …-arm); tag = pure version.
+          ARCH_NAME="${IMAGE_NAME}-${PLATFORM}"
+          SETONIX_REF="setonix-registry.pawsey.org.au/pawsey/${ARCH_NAME}:${VERSION}"
+          TAR="${ARCH_NAME}_${VERSION}.tar"
+          SIF="${ARCH_NAME}_${VERSION}.sif"
           echo "Source:  docker://${SOURCE_REF}  (linux/${ARCH})"
           echo "Setonix: docker://${SETONIX_REF}"
 
@@ -133,5 +134,5 @@ jobs:
           {
             echo "## Image sync — ${PLATFORM}"
             echo "- setonix: \`${{ steps.mirror.outputs.setonix_ref }}\`"
-            echo "- artifacts: \`${IMAGE_NAME}_${VERSION}-${PLATFORM}.{tar,sif}\` → Acacia"
+            echo "- artifacts: \`${IMAGE_NAME}-${PLATFORM}_${VERSION}.{tar,sif}\` → Acacia"
           } >> "$GITHUB_STEP_SUMMARY"
