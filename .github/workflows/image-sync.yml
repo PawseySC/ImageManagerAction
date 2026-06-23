@@ -1,10 +1,11 @@
 name: Sync — import external image
 
 # Triggered (workflow_dispatch) by ImageManagerWeb's "Sync external image" form.
-# Takes an existing quay.io/pawseysc/<repo>:<version> image and: mirrors it to the
-# Setonix registry (pawsey namespace), saves a .tar and builds a .sif, and uploads
-# both to Acacia — so an externally-built image lands in our catalog + infra. Runs
-# on a self-hosted X64 runner (reaches the internal registry + has podman/singularity).
+# Takes an existing quay.io/pawseysc/<repo>:<version> image and, FOR EACH selected
+# platform, mirrors that arch to the Setonix registry (pawsey) as <repo>:<version>-<plat>
+# and builds a per-arch .tar + .sif uploaded to Acacia. Each platform builds on its
+# native self-hosted runner (X64 / ARM64), matching the build pipeline's per-platform
+# tagging convention.
 
 on:
   workflow_dispatch:
@@ -14,22 +15,31 @@ on:
         required: true
         type: string
       image_name:
-        description: 'Repo name, no registry/tag (e.g. nvidia-pytorch-...)'
+        description: 'Repo name, no registry/tag'
         required: true
         type: string
       version:
-        description: 'Version tag (X.Y.Z)'
+        description: 'Version (X.Y.Z)'
+        required: true
+        type: string
+      matrix:
+        description: 'JSON matrix, e.g. {"include":[{"platform":"x86","arch":"amd64","runner":"X64"}]}'
         required: true
         type: string
 
 jobs:
   sync:
-    runs-on: [self-hosted, X64]
+    strategy:
+      matrix: ${{ fromJson(inputs.matrix) }}
+      fail-fast: false
+    runs-on: [self-hosted, "${{ matrix.runner }}"]
     timeout-minutes: 90
     env:
       SOURCE_REF: ${{ inputs.source_ref }}
       IMAGE_NAME: ${{ inputs.image_name }}
       VERSION: ${{ inputs.version }}
+      PLATFORM: ${{ matrix.platform }}
+      ARCH: ${{ matrix.arch }}
       QUAY_SC_USER: ${{ vars.QUAYIO_SC_USERNAME }}
       QUAY_SC_TOKEN: ${{ secrets.QUAYIO_SC_TOKEN }}
       SETONIX_USER: ${{ vars.SETONIXREG_USERNAME }}
@@ -37,7 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Mirror to Setonix (pawsey) + save TAR
+      - name: Mirror ${{ matrix.platform }} → Setonix + save TAR
         id: mirror
         run: |
           set -euo pipefail
@@ -49,10 +59,11 @@ jobs:
           export TMPDIR=/container/${USER}/tmp-${RID}/
           mkdir -p "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR" "$TMPDIR"
 
-          SETONIX_REF="setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${VERSION}"
-          TAR="${IMAGE_NAME}_${VERSION}.tar"
-          SIF="${IMAGE_NAME}_${VERSION}.sif"
-          echo "Source:  docker://${SOURCE_REF}"
+          TAG="${VERSION}-${PLATFORM}"
+          SETONIX_REF="setonix-registry.pawsey.org.au/pawsey/${IMAGE_NAME}:${TAG}"
+          TAR="${IMAGE_NAME}_${TAG}.tar"
+          SIF="${IMAGE_NAME}_${TAG}.sif"
+          echo "Source:  docker://${SOURCE_REF}  (linux/${ARCH})"
           echo "Setonix: docker://${SETONIX_REF}"
 
           retry() { local n=1; until "$@"; do [ "$n" -ge 3 ] && return 1; echo "retry $n…"; sleep $((5*n)); n=$((n+1)); done; }
@@ -60,10 +71,10 @@ jobs:
           retry podman login quay.io -u "$QUAY_SC_USER" -p "$QUAY_SC_TOKEN"
           retry podman login https://setonix-registry.pawsey.org.au -u "$SETONIX_USER" -p "$SETONIX_PASS"
 
-          echo "Pulling source (linux/amd64)…"
-          retry podman pull --platform linux/amd64 "docker://${SOURCE_REF}"
+          echo "Pulling the ${ARCH} variant…"
+          retry podman pull --platform "linux/${ARCH}" "docker://${SOURCE_REF}"
 
-          echo "Pushing to Setonix…"
+          echo "Pushing to Setonix as ${TAG}…"
           podman tag "${SOURCE_REF}" "${SETONIX_REF}"
           retry podman push "${SETONIX_REF}"
 
@@ -71,8 +82,8 @@ jobs:
           podman save --format docker-archive "${SOURCE_REF}" -o "${TAR}"
           ls -lh "${TAR}"
 
-          echo "tar=${TAR}" >> "$GITHUB_OUTPUT"
-          echo "sif=${SIF}" >> "$GITHUB_OUTPUT"
+          echo "tar=${TAR}"         >> "$GITHUB_OUTPUT"
+          echo "sif=${SIF}"         >> "$GITHUB_OUTPUT"
           echo "setonix_ref=${SETONIX_REF}" >> "$GITHUB_OUTPUT"
 
       - name: Upload TAR to Acacia
@@ -88,7 +99,6 @@ jobs:
           upload_file_type: 'archive'
 
       - name: Build SIF from the TAR
-        id: sif
         run: |
           set -euo pipefail
           TAR="${{ steps.mirror.outputs.tar }}"
@@ -120,7 +130,8 @@ jobs:
           export XDG_DATA_HOME=/container/${USER}/data-${RID} XDG_RUNTIME_DIR=/container/${USER}/runtime-${RID} TMPDIR=/container/${USER}/tmp-${RID}/
           podman rmi "${SOURCE_REF}" "${{ steps.mirror.outputs.setonix_ref }}" 2>/dev/null || true
           rm -f "${{ steps.mirror.outputs.tar }}" "${{ steps.mirror.outputs.sif }}" 2>/dev/null || true
-          echo "## Image sync"            >> "$GITHUB_STEP_SUMMARY"
-          echo "- source: \`${SOURCE_REF}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- setonix: \`${{ steps.mirror.outputs.setonix_ref }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- tar/sif: \`${IMAGE_NAME}_${VERSION}.{tar,sif}\` → Acacia" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Image sync — ${PLATFORM}"
+            echo "- setonix: \`${{ steps.mirror.outputs.setonix_ref }}\`"
+            echo "- artifacts: \`${IMAGE_NAME}_${VERSION}-${PLATFORM}.{tar,sif}\` → Acacia"
+          } >> "$GITHUB_STEP_SUMMARY"
