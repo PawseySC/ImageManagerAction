@@ -75,7 +75,7 @@ jobs:
           echo "Pulling the ${ARCH} variant…"
           retry podman pull --platform "linux/${ARCH}" "docker://${SOURCE_REF}"
 
-          echo "Pushing to Setonix as ${TAG}…"
+          echo "Pushing to Setonix as ${SETONIX_REF}…"
           podman tag "${SOURCE_REF}" "${SETONIX_REF}"
           retry podman push "${SETONIX_REF}"
 
