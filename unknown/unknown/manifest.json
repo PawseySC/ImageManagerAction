@@ -1,0 +1,27 @@
+{
+  "main": "unknown",
+  "feature": "unknown",
+  "version": "0.0.7",
+  "devmode": true,
+  "scan": true,
+  "platform": "x86",
+  "shpc": false,
+  "targets": [],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "PawseySC/ImageManagerAction",
+    "branch": "cicd-unknown/unknown",
+    "path": "unknown/unknown/"
+  },
+  "metadata": {
+    "timestamp": "2026-06-24T04:24:03.927490Z",
+    "correlation_id": "19f6023d-e66f-4085-910d-6809a94d9d76"
+  },
+  "labels": {
+    "org.opencontainers.image.authors": "Shusen LIU",
+    "org.opencontainers.image.name": "TEST2",
+    "org.opencontainers.image.noscan": "false"
+  }
+}
