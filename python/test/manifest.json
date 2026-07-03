@@ -1,0 +1,24 @@
+{
+  "main": "python",
+  "feature": "test",
+  "version": "1.0.0",
+  "devmode": false,
+  "scan": true,
+  "platform": "x86",
+  "shpc": false,
+  "targets": [
+    "dockerhub"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "PawseySC/ImageManagerAction",
+    "branch": "cicd-python/test",
+    "path": "python/test/"
+  },
+  "metadata": {
+    "timestamp": "2026-07-03T13:52:41.118537Z",
+    "correlation_id": "249f4dcc-d057-4e69-9c2d-fa8aecad3929"
+  }
+}
