@@ -27,9 +27,6 @@ on:
       build_matrix:
         required: true
         type: string
-      image_name:
-        required: true
-        type: string
       result_prepare:
         required: true
         type: string

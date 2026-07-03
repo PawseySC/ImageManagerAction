@@ -224,7 +224,6 @@ jobs:
       has_template: ${{ needs.PREPARE.outputs.has_template }}
       variant_count: ${{ needs.PREPARE.outputs.variant_count }}
       build_matrix: ${{ needs.PREPARE.outputs.build_matrix }}
-      image_name: ${{ needs.BUILD.outputs.image_name }}
       result_prepare: ${{ needs.PREPARE.result }}
       result_build: ${{ needs.BUILD.result }}
       result_scan: ${{ needs.SCAN.result }}

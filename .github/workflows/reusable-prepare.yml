@@ -5,8 +5,6 @@ on:
     secrets:
       PAT_TOKEN:
         required: false
-      DOCKERHUB_TOKEN:
-        required: false
       QUAYIO_TOKEN:
         required: false
       QUAYIO_SC_TOKEN:
@@ -60,12 +58,6 @@ on:
       correlation_id:
         description: "Unique ID for tracking"
         value: ${{ jobs.prepare.outputs.correlation_id }}
-      date:
-        description: "Date tag"
-        value: ${{ jobs.prepare.outputs.date }}
-      dockerhub_available:
-        description: "Whether Docker Hub credentials are available"
-        value: ${{ jobs.prepare.outputs.dockerhub_available }}
       quayio_available:
         description: "Whether Quay.io credentials are available"
         value: ${{ jobs.prepare.outputs.quayio_available }}
@@ -106,8 +98,6 @@ jobs:
       dockerfile_path: ${{ steps.validate_manifest.outputs.dockerfile_path }}
       has_tests: ${{ steps.validate_manifest.outputs.has_tests }}
       correlation_id: ${{ steps.validate_manifest.outputs.correlation_id }}
-      date: ${{ steps.date.outputs.date }}
-      dockerhub_available: ${{ steps.check_vars_secrets.outputs.dockerhub_available }}
       quayio_available: ${{ steps.check_vars_secrets.outputs.quayio_available }}
       quayiosc_available: ${{ steps.check_vars_secrets.outputs.quayiosc_available }}
       setonixreg_available: ${{ steps.check_vars_secrets.outputs.setonixreg_available }}
@@ -129,10 +119,6 @@ jobs:
           missing_secrets=()
 
           # check Variables
-          if [ -z "${{ vars.DOCKERHUB_USERNAME }}" ]; then
-            missing_vars+=("DOCKERHUB_USERNAME")
-          fi
-
           if [ -z "${{ vars.QUAYIO_USERNAME }}" ]; then
             missing_vars+=("QUAYIO_USERNAME")
           fi
@@ -152,10 +138,6 @@ jobs:
           # check Secrets
           if [ -z "${{ secrets.PAT_TOKEN }}" ]; then
             missing_secrets+=("PAT_TOKEN")
-          fi
-
-          if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-            missing_secrets+=("DOCKERHUB_TOKEN")
           fi
 
           if [ -z "${{ secrets.QUAYIO_TOKEN }}" ]; then
@@ -188,7 +170,6 @@ jobs:
           fi
 
           # Set output flags for conditional job execution
-          dockerhub_available=$( [ -n "${{ vars.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ] && echo 'true' || echo 'false' )
           quayio_available=$( [ -n "${{ vars.QUAYIO_USERNAME }}" ] && [ -n "${{ secrets.QUAYIO_TOKEN }}" ] && echo 'true' || echo 'false' )
           # pawseysc org on quay.io uses a separate push token (QUAYIO_SC_TOKEN);
           # the login username falls back to QUAYIO_USERNAME when the optional
@@ -196,7 +177,6 @@ jobs:
           quayiosc_available=$( [ -n "${{ secrets.QUAYIO_SC_TOKEN }}" ] && { [ -n "${{ vars.QUAYIO_SC_USERNAME }}" ] || [ -n "${{ vars.QUAYIO_USERNAME }}" ]; } && echo 'true' || echo 'false' )
           setonixreg_available=$( [ -n "${{ vars.SETONIXREG_USERNAME }}" ] && [ -n "${{ secrets.SETONIXREG_PASS }}" ] && echo 'true' || echo 'false' )
 
-          echo "dockerhub_available=$dockerhub_available" >> $GITHUB_OUTPUT
           echo "quayio_available=$quayio_available" >> $GITHUB_OUTPUT
           echo "quayiosc_available=$quayiosc_available" >> $GITHUB_OUTPUT
           echo "setonixreg_available=$setonixreg_available" >> $GITHUB_OUTPUT
@@ -204,12 +184,6 @@ jobs:
           # Log registry availability status
           echo ""
           echo "=== Registry Credentials Check ==="
-          if [ "$dockerhub_available" = "true" ]; then
-            echo "[✓] Docker Hub: Credentials available"
-          else
-            echo "[✗] Docker Hub: Missing credentials (DOCKERHUB_USERNAME or DOCKERHUB_TOKEN)"
-          fi
-
           if [ "$quayio_available" = "true" ]; then
             echo "[✓] Quay.io: Credentials available"
           else
@@ -442,14 +416,6 @@ jobs:
             echo 'runner_label=["self-hosted","X64"]' >> $GITHUB_OUTPUT
           fi
           echo "Selected runner: self-hosted/$([ "$platform" = "arm" ] && echo ARM64 || echo X64) for platform: $platform"
-
-      - name: Generate date tag
-        if: steps.validate_manifest.outputs.proceed_valid == 'true'
-        id: date
-        run: |
-          date_tag=$(date +'%m-%d')
-          echo "Date tag: $date_tag"
-          echo "date=$date_tag" >> $GITHUB_OUTPUT
 
       - name: Process template and generate build matrix
         if: steps.validate_manifest.outputs.proceed_valid == 'true'
