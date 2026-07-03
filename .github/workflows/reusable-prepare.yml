@@ -407,7 +407,6 @@ jobs:
         uses: ./.github/actions/process-template
         with:
           manifest_path: ${{ steps.validate_manifest.outputs.branch_path }}/manifest.json
-          dockerfile_path: ${{ steps.validate_manifest.outputs.dockerfile_path }}
           main: ${{ steps.validate_manifest.outputs.main }}
           feature: ${{ steps.validate_manifest.outputs.feature }}
 

@@ -301,13 +301,9 @@ jobs:
           **Available Variants:**
           EOF
                 matrix_json='${{ inputs.build_matrix }}'
-                while read variant; do
-                  echo "- \`quay.io/pawsey/${IMAGE_NAME}${variant}:${VERSION}\`" >> /tmp/shpc_block.txt
-                done < <(echo "$matrix_json" | jq -r '.include[] |
-                  .values |
-                  to_entries |
-                  map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                  join("")')
+                while read -r vimg; do
+                  echo "- \`quay.io/pawsey/${vimg}:${VERSION}\`" >> /tmp/shpc_block.txt
+                done < <(echo "$matrix_json" | jq -r '.include[].image_name')
                 echo "" >> /tmp/shpc_block.txt
                 echo "### SHPC Usage Commands" >> /tmp/shpc_block.txt
                 echo "" >> /tmp/shpc_block.txt
