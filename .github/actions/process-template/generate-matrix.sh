@@ -35,11 +35,15 @@ template=$(jq -c '.template' "$manifest_file")
 # Cartesian product, all in jq (no shell string-splicing → values with quotes,
 # spaces, or backslashes are safe). Keys iterate in SORTED order — identical to
 # the old `jq keys` loop — so index/variant_suffix/image_name stay stable.
+# Ordering MUST be first-key-fastest to match the old shell action byte-for-byte:
+# bind the NEW key's values ($v) in the OUTER position and the existing combos
+# ($c) in the INNER position. (Binding $c outer would make the LAST key vary
+# fastest, relabelling every index/artifact name — see tests/template-multikey.)
 combinations=$(jq -c '
   to_entries | sort_by(.key) |
   reduce .[] as $e ([{}];
-    [ .[] as $c
-      | (($e.value | if type == "array" then .[] else . end) | tostring) as $v
+    [ (($e.value | if type == "array" then .[] else . end) | tostring) as $v
+      | .[] as $c
       | ($c + {($e.key): $v}) ])
 ' <<< "$template")
 

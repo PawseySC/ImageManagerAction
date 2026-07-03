@@ -1,0 +1,56 @@
+{
+  "include": [
+    {
+      "image_name": "python-cuda-cuda_version-12.4-py-3.11",
+      "index": 1,
+      "values": {
+        "CUDA_VERSION": "12.4",
+        "PY": "3.11"
+      },
+      "variant_suffix": "-cuda_version-12.4-py-3.11",
+      "varying_keys": [
+        "CUDA_VERSION",
+        "PY"
+      ]
+    },
+    {
+      "image_name": "python-cuda-cuda_version-12.6-py-3.11",
+      "index": 2,
+      "values": {
+        "CUDA_VERSION": "12.6",
+        "PY": "3.11"
+      },
+      "variant_suffix": "-cuda_version-12.6-py-3.11",
+      "varying_keys": [
+        "CUDA_VERSION",
+        "PY"
+      ]
+    },
+    {
+      "image_name": "python-cuda-cuda_version-12.4-py-3.12",
+      "index": 3,
+      "values": {
+        "CUDA_VERSION": "12.4",
+        "PY": "3.12"
+      },
+      "variant_suffix": "-cuda_version-12.4-py-3.12",
+      "varying_keys": [
+        "CUDA_VERSION",
+        "PY"
+      ]
+    },
+    {
+      "image_name": "python-cuda-cuda_version-12.6-py-3.12",
+      "index": 4,
+      "values": {
+        "CUDA_VERSION": "12.6",
+        "PY": "3.12"
+      },
+      "variant_suffix": "-cuda_version-12.6-py-3.12",
+      "varying_keys": [
+        "CUDA_VERSION",
+        "PY"
+      ]
+    }
+  ]
+}
