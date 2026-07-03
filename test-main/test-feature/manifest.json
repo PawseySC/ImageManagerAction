@@ -1,0 +1,31 @@
+{
+  "main": "test-main",
+  "feature": "test-feature",
+  "version": "1.0.0",
+  "devmode": false,
+  "scan": true,
+  "platform": "x86",
+  "shpc": false,
+  "targets": [
+    "quay.io"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "PawseySC/ImageManagerAction",
+    "branch": "cicd-test-main/test-feature",
+    "path": "test-main/test-feature/"
+  },
+  "metadata": {
+    "timestamp": "2026-07-03T18:13:18.983630Z",
+    "correlation_id": "f92898ef-9f24-482d-8011-258bdd1f3556"
+  },
+  "template": {
+    "CUDA_VERSION": [
+      "12.6",
+      "12.7"
+    ],
+    "PYTHON_VERSION": "3.10"
+  }
+}
