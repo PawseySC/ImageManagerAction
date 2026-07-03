@@ -1,0 +1,29 @@
+{
+  "main": "python",
+  "feature": "cuda",
+  "version": "1.0.0",
+  "devmode": false,
+  "scan": true,
+  "platform": "x86",
+  "shpc": false,
+  "targets": [
+    "dockerhub"
+  ],
+  "private-targets": [
+    "liu268"
+  ],
+  "github": {
+    "repo": "PawseySC/ImageManagerAction",
+    "branch": "cicd-python/cuda",
+    "path": "python/cuda/"
+  },
+  "metadata": {
+    "timestamp": "2026-07-03T13:52:41.867604Z",
+    "correlation_id": "5f0af5d1-a837-422c-97c7-369cbca1b187"
+  },
+  "labels": {
+    "org.opencontainers.image.authors": "Test User",
+    "org.opencontainers.image.name": "test-image:latest",
+    "org.opencontainers.image.branch": "cicd-python/cuda"
+  }
+}
