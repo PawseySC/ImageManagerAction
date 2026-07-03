@@ -71,18 +71,7 @@ jobs:
         echo "Test bundle: ${{ inputs.branch_path }}/tests/"
 
     - name: Configure podman environment
-      run: |
-        # Per-runner isolation so multiple runners (even on one machine) never
-        # share a rootless-podman store. RID = stable fs-safe hash of runner name.
-        RID=$(printf '%s' "${RUNNER_NAME:-default}" | sha1sum | cut -c1-12)
-        export XDG_DATA_HOME=/container/${USER}/data-${RID}
-        export XDG_RUNTIME_DIR=/container/${USER}/runtime-${RID}
-        export TMPDIR=/container/${USER}/tmp-${RID}/
-        mkdir -p "${XDG_DATA_HOME}" "${XDG_RUNTIME_DIR}" "${TMPDIR}"
-        echo "RID=${RID}" >> $GITHUB_ENV
-        echo "XDG_DATA_HOME=${XDG_DATA_HOME}" >> $GITHUB_ENV
-        echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> $GITHUB_ENV
-        echo "TMPDIR=${TMPDIR}" >> $GITHUB_ENV
+      uses: ./.github/actions/podman-env
 
     - name: Download archive from S3
       id: locate_archive

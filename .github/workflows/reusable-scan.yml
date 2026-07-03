@@ -41,6 +41,14 @@ jobs:
       VERSION: ${{ inputs.version }}
       REPORT_DIR: ./trivy-reports
     steps:
+    # Local composite actions (./.github/actions/…) resolve against the job's
+    # OWN checkout — never rely on a previous job's leftover workspace, which on
+    # self-hosted runners can hold a DIFFERENT branch's version of the action.
+    - name: Checkout (required to resolve local composite actions)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+
     - name: Set image name for this variant
       id: set_image_name
       run: |
@@ -79,7 +87,8 @@ jobs:
 
     # Generate JSON report first
     - name: Run vulnerability scan (JSON)
-      uses: aquasecurity/trivy-action@master
+      # renovate: pin to release tag — @master is not reproducible
+      uses: aquasecurity/trivy-action@v0.36.0
       with:
         scan-type: image
         input: ./${{ steps.locate.outputs.archive_name }}
@@ -97,14 +106,18 @@ jobs:
 
     # Process JSON to create readable summary
     - name: Process scan results to summary
+      env:
+        JSON_FILE: ${{ env.REPORT_DIR }}/scan-results.json
+        SUMMARY_FILE: ${{ env.REPORT_DIR }}/summary.md
+        COUNTS_FILE: ${{ env.REPORT_DIR }}/scan-counts.json
       run: |
-        python3 -c "
+        python3 - <<'PY'
         import json
         import sys
         import os
 
-        json_file = '${REPORT_DIR}/scan-results.json'
-        output_file = '${REPORT_DIR}/summary.md'
+        json_file = os.environ["JSON_FILE"]
+        output_file = os.environ["SUMMARY_FILE"]
 
         try:
             with open(json_file, 'r') as f:
@@ -159,7 +172,7 @@ jobs:
                     f.write('### Good News! 🎉\n\n')
                     f.write('No CRITICAL or HIGH severity vulnerabilities found.\n')
                     if counts['MEDIUM'] > 0:
-                        f.write(f'Only {counts[\"MEDIUM\"]} MEDIUM severity issues detected.\n')
+                        f.write(f'Only {counts["MEDIUM"]} MEDIUM severity issues detected.\n')
                 else:
                     f.write('### Excellent! ✅\n\n')
                     f.write('No vulnerabilities found in this image.\n')
@@ -168,7 +181,7 @@ jobs:
 
             # Machine-readable counts for the ImageManagerWeb summary; rides along
             # in the trivy-reports-* artifact and is aggregated by the SUMMARY job.
-            with open('${REPORT_DIR}/scan-counts.json', 'w') as cf:
+            with open(os.environ["COUNTS_FILE"], 'w') as cf:
                 json.dump({
                     'image_name': os.environ.get('IMAGE_NAME', ''),
                     'version': os.environ.get('VERSION', ''),
@@ -183,7 +196,7 @@ jobs:
                 f.write(f'**JSON file:** {json_file}\n')
                 f.write(f'**File exists:** {os.path.exists(json_file)}\n')
             print(f'Error: {e}', file=sys.stderr)
-        "
+        PY
 
     - name: Debug scan output
       run: |
@@ -224,25 +237,6 @@ jobs:
             echo "Check the debug steps above for more details."
           fi
         } >> "$GITHUB_STEP_SUMMARY"
-
-    # Generate SARIF report for GitHub Security
-    - name: Generate security report (SARIF)
-      uses: aquasecurity/trivy-action@master
-      if: always()
-      with:
-        scan-type: image
-        input: ./${{ steps.locate.outputs.archive_name }}
-        format: sarif
-        output: ${{ env.REPORT_DIR }}/trivy-results.sarif
-        severity: CRITICAL,HIGH,MEDIUM
-        ignore-unfixed: true
-        vuln-type: os,library
-        exit-code: '0'
-        hide-progress: true
-        cache: true
-      env:
-        TRIVY_SKIP_DB_UPDATE: true
-        TRIVY_SKIP_JAVA_DB_UPDATE: true
 
     - name: Archive scan reports
       uses: actions/upload-artifact@v7

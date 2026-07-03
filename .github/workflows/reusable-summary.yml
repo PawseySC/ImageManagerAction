@@ -27,9 +27,6 @@ on:
       build_matrix:
         required: true
         type: string
-      image_name:
-        required: true
-        type: string
       result_prepare:
         required: true
         type: string
@@ -166,7 +163,10 @@ jobs:
             echo "" >> /tmp/registry_block.txt
 
             # Setonix Private Registry (attempted whenever credentials are available)
-            if [ "${{ inputs.setonixreg_available }}" = "true" ]; then
+            if [ "${{ inputs.result_push_priv }}" = "skipped" ]; then
+              echo "### Setonix Private Registry — ⏭️ skipped (no private target selected or credentials unavailable)" >> /tmp/registry_block.txt
+              echo "" >> /tmp/registry_block.txt
+            elif [ "${{ inputs.setonixreg_available }}" = "true" ]; then
               if [ "${{ inputs.result_push_priv }}" = "success" ]; then
                 echo "### Setonix Private Registry — ✅ pushed" >> /tmp/registry_block.txt
                 echo "" >> /tmp/registry_block.txt
@@ -232,7 +232,9 @@ jobs:
             # Setonix Private Registry (always attempted if credentials available)
             private_targets='${{ inputs.private_targets }}'
             private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
-            if [ "${{ inputs.setonixreg_available }}" = "true" ] && [ "${{ inputs.result_push_priv }}" = "success" ]; then
+            if [ "${{ inputs.result_push_priv }}" = "skipped" ]; then
+              echo "| Setonix Private | — | ⏭️ Skipped (no private target or credentials unavailable) |" >> /tmp/registry_block.txt
+            elif [ "${{ inputs.setonixreg_available }}" = "true" ] && [ "${{ inputs.result_push_priv }}" = "success" ]; then
               echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |" >> /tmp/registry_block.txt
             elif [ "${{ inputs.setonixreg_available }}" = "true" ]; then
               echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ❌ Failed |" >> /tmp/registry_block.txt
@@ -299,13 +301,9 @@ jobs:
           **Available Variants:**
           EOF
                 matrix_json='${{ inputs.build_matrix }}'
-                while read variant; do
-                  echo "- \`quay.io/pawsey/${IMAGE_NAME}${variant}:${VERSION}\`" >> /tmp/shpc_block.txt
-                done < <(echo "$matrix_json" | jq -r '.include[] |
-                  .values |
-                  to_entries |
-                  map("-" + (.key | ascii_downcase) + "-" + (.value | ascii_downcase)) |
-                  join("")')
+                while read -r vimg; do
+                  echo "- \`quay.io/pawsey/${vimg}:${VERSION}\`" >> /tmp/shpc_block.txt
+                done < <(echo "$matrix_json" | jq -r '.include[].image_name')
                 echo "" >> /tmp/shpc_block.txt
                 echo "### SHPC Usage Commands" >> /tmp/shpc_block.txt
                 echo "" >> /tmp/shpc_block.txt
@@ -538,7 +536,8 @@ jobs:
           setpub_in=no; echo "$TARGETS" | jq -e 'contains(["setonix-registry"])' >/dev/null 2>&1 && setpub_in=yes
 
           priv_result="skipped"
-          if [ "$SETONIXREG_AVAILABLE" = "true" ] && [ "$RESULT_PUSH_PRIV" = "success" ]; then priv_result="success"
+          if [ "$RESULT_PUSH_PRIV" = "skipped" ]; then priv_result="skipped"
+          elif [ "$SETONIXREG_AVAILABLE" = "true" ] && [ "$RESULT_PUSH_PRIV" = "success" ]; then priv_result="success"
           elif [ "$SETONIXREG_AVAILABLE" = "true" ]; then priv_result="failed"; fi
 
           quay_result="not_in_targets"

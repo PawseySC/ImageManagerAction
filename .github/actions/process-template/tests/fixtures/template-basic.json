@@ -1,0 +1,1 @@
+{"main":"python","feature":"cuda","template":{"CUDA_VERSION":["12.4","12.6"],"PY":"3.12"}}

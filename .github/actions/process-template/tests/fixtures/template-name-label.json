@@ -1,0 +1,1 @@
+{"main":"mpi","feature":"gpu","labels":{"org.opencontainers.image.name":"rocm${ROCM}"},"template":{"ROCM":["5.7","6.1"],"FLAGS":"-O2 --with-x \"quoted\""}}

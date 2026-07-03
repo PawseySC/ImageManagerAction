@@ -71,6 +71,14 @@ jobs:
       VERSION: ${{ inputs.version }}
       TARGETS: ${{ inputs.targets }}
     steps:
+    # Local composite actions (./.github/actions/…) resolve against the job's
+    # OWN checkout — never rely on a previous job's leftover workspace, which on
+    # self-hosted runners can hold a DIFFERENT branch's version of the action.
+    - name: Checkout (required to resolve local composite actions)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+
     - name: Set image name for this variant
       id: set_image_name
       run: |
@@ -129,32 +137,7 @@ jobs:
 
     - name: Configure podman environment
       if: inputs.quayio_available == 'true' || inputs.quayiosc_available == 'true' || inputs.setonixreg_available == 'true'
-      run: |
-        echo "Setting up container environment variables for public push..."
-
-        # Export environment variables (same as BUILD-job)
-        # Per-runner isolation so multiple runners (even on one machine) never
-        # share a rootless-podman store. RID = stable fs-safe hash of the runner name.
-        RID=$(printf '%s' "${RUNNER_NAME:-default}" | sha1sum | cut -c1-12)
-        echo "RID=${RID}" >> $GITHUB_ENV
-        export XDG_DATA_HOME=/container/${USER}/data-${RID}
-        export XDG_RUNTIME_DIR=/container/${USER}/runtime-${RID}
-        export TMPDIR=/container/${USER}/tmp-${RID}/
-
-        # Create required directories
-        mkdir -p ${XDG_DATA_HOME}
-        mkdir -p ${XDG_RUNTIME_DIR}
-        mkdir -p ${TMPDIR}
-
-        echo "Public push environment setup completed:"
-        echo "XDG_DATA_HOME: ${XDG_DATA_HOME}"
-        echo "XDG_RUNTIME_DIR: ${XDG_RUNTIME_DIR}"
-        echo "TMPDIR: ${TMPDIR}"
-
-        # Set environment variables for subsequent steps
-        echo "XDG_DATA_HOME=${XDG_DATA_HOME}" >> $GITHUB_ENV
-        echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> $GITHUB_ENV
-        echo "TMPDIR=${TMPDIR}" >> $GITHUB_ENV
+      uses: ./.github/actions/podman-env
 
     - name: Download archive and load to podman
       id: locate_and_load
@@ -190,20 +173,8 @@ jobs:
         echo " Quay.io Push Process"
         echo "=========================================="
 
-        retry() {
-          local attempts="$1"; local delay="$2"; shift 2
-          local n=1
-          until "$@"; do
-            if [ "$n" -ge "$attempts" ]; then
-              echo "✗ Command failed after $n attempts: $*"
-              return 1
-            fi
-            echo "↻ Attempt $n failed; retrying in ${delay}s…"
-            sleep "$delay"
-            n=$((n+1))
-            delay=$((delay*2))
-          done
-        }
+        # Retry helper: retry <attempts> <delay_seconds> <command...>
+        source .github/scripts/retry.sh
 
         echo "🔐 Logging into Quay.io..."
         retry 3 5 podman login quay.io \
@@ -240,20 +211,8 @@ jobs:
         echo " Quay.io (pawseysc) Push Process"
         echo "=========================================="
 
-        retry() {
-          local attempts="$1"; local delay="$2"; shift 2
-          local n=1
-          until "$@"; do
-            if [ "$n" -ge "$attempts" ]; then
-              echo "✗ Command failed after $n attempts: $*"
-              return 1
-            fi
-            echo "↻ Attempt $n failed; retrying in ${delay}s…"
-            sleep "$delay"
-            n=$((n+1))
-            delay=$((delay*2))
-          done
-        }
+        # Retry helper: retry <attempts> <delay_seconds> <command...>
+        source .github/scripts/retry.sh
 
         echo "🔐 Logging into Quay.io (pawseysc)..."
         retry 3 5 podman login quay.io \
@@ -283,20 +242,8 @@ jobs:
         echo " Setonix Public Registry Push Process"
         echo "=========================================="
 
-        retry() {
-          local attempts="$1"; local delay="$2"; shift 2
-          local n=1
-          until "$@"; do
-            if [ "$n" -ge "$attempts" ]; then
-              echo "✗ Command failed after $n attempts: $*"
-              return 1
-            fi
-            echo "↻ Attempt $n failed; retrying in ${delay}s…"
-            sleep "$delay"
-            n=$((n+1))
-            delay=$((delay*2))
-          done
-        }
+        # Retry helper: retry <attempts> <delay_seconds> <command...>
+        source .github/scripts/retry.sh
 
         echo "🔐 Logging into Setonix Registry..."
         retry 3 5 podman login https://setonix-registry.pawsey.org.au \

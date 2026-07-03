@@ -1,0 +1,25 @@
+name: 'Podman environment'
+description: >-
+  Per-runner rootless-podman isolation: multiple runners on one machine must
+  never share a store. RID = stable fs-safe hash of the runner name. Exports
+  RID, XDG_DATA_HOME, XDG_RUNTIME_DIR, TMPDIR via GITHUB_ENV and creates the
+  directories.
+runs:
+  using: 'composite'
+  steps:
+    - name: Export per-runner podman env
+      shell: bash
+      run: |
+        set -euo pipefail
+        RID=$(printf '%s' "${RUNNER_NAME:-default}" | sha1sum | cut -c1-12)
+        XDG_DATA_HOME="/container/${USER}/data-${RID}"
+        XDG_RUNTIME_DIR="/container/${USER}/runtime-${RID}"
+        TMPDIR="/container/${USER}/tmp-${RID}/"
+        mkdir -p "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR" "$TMPDIR"
+        {
+          echo "RID=${RID}"
+          echo "XDG_DATA_HOME=${XDG_DATA_HOME}"
+          echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}"
+          echo "TMPDIR=${TMPDIR}"
+        } >> "$GITHUB_ENV"
+        echo "Podman env ready (RID=${RID})"

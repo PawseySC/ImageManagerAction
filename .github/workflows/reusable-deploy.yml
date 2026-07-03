@@ -87,6 +87,9 @@ jobs:
 
       - name: Determine deployment target and get SHA256 digest
         id: get_image_info
+        env:
+          QUAY_USER: ${{ vars.QUAYIO_USERNAME }}
+          QUAY_TOKEN: ${{ secrets.QUAYIO_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -108,24 +111,52 @@ jobs:
 
           # Get manifest and extract digest. Refuse to write SHPC entry with a fake digest
           # because downstream `shpc install` will then pin to a non-existent layer.
+          # Get a pull token. quay.io requires one even for public repos when we
+          # want the Docker-Content-Digest header reliably; for repos still
+          # private (visibility is no longer auto-flipped on first push) the
+          # robot credentials are REQUIRED.
           echo "Fetching manifest for tag: ${VERSION}"
-
-          manifest_response=$(curl -fsS \
-            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-            "$registry_url/$api_path/manifests/${VERSION}") || {
-              echo "Error: Failed to fetch manifest from $registry_url/$api_path/manifests/${VERSION}"
-              exit 1
-            }
-
-          digest=$(echo "$manifest_response" | jq -r '.config.digest // empty')
-
-          if [ -z "$digest" ] || [ "$digest" = "null" ]; then
-            echo "Error: Manifest fetched but '.config.digest' is missing or null"
-            echo "Response (truncated): ${manifest_response:0:500}"
+          token=$(curl -fsS -u "${QUAY_USER}:${QUAY_TOKEN}" \
+            "https://quay.io/v2/auth?service=quay.io&scope=repository:${api_path}:pull" \
+            | jq -r '.token // empty')
+          if [ -z "$token" ]; then
+            echo "::error::Could not obtain quay.io pull token for ${api_path}"
             exit 1
           fi
 
-          echo "SHA256 digest: $digest"
+          headers_file=$(mktemp)
+          manifest_response=$(curl -fsS -D "$headers_file" \
+            -H "Authorization: Bearer ${token}" \
+            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+            -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+            -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+            -H "Accept: application/vnd.oci.image.index.v1+json" \
+            "$registry_url/$api_path/manifests/${VERSION}") || {
+              echo "::error::Failed to fetch manifest from $registry_url/$api_path/manifests/${VERSION}"
+              exit 1
+            }
+
+          # The digest that `podman pull image@sha256:…` resolves is the MANIFEST
+          # digest (Docker-Content-Digest header) — NOT the image config-blob
+          # digest, which is the digest of the config blob and does not resolve
+          # as a pull ref.
+          digest=$(awk 'tolower($1)=="docker-content-digest:" {print $2}' "$headers_file" | tr -d '\r')
+          if [ -z "$digest" ]; then
+            # Hard failure by design: hashing the body ourselves risks a subtly
+            # wrong digest (command substitution strips trailing newlines), and a
+            # wrong pin is exactly the broken-SHPC-entry class this step exists
+            # to prevent. quay.io always sends the header in practice.
+            echo "::error::Docker-Content-Digest header missing from manifest response — refusing to guess the digest"
+            rm -f "$headers_file"
+            exit 1
+          fi
+          rm -f "$headers_file"
+
+          case "$digest" in
+            sha256:*) ;;
+            *) echo "::error::Bad digest '$digest'"; exit 1 ;;
+          esac
+          echo "Manifest digest: $digest"
 
           # Set outputs
           echo "full_image=$full_image" >> $GITHUB_OUTPUT

@@ -47,17 +47,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Configure podman environment
+        uses: ./.github/actions/podman-env
+
       - name: Mirror ${{ matrix.platform }} → Setonix + save TAR
         id: mirror
         run: |
           set -euo pipefail
-
-          # Per-runner rootless-podman isolation (same scheme as the build/push jobs).
-          RID=$(printf '%s' "${RUNNER_NAME:-default}" | sha1sum | cut -c1-12)
-          export XDG_DATA_HOME=/container/${USER}/data-${RID}
-          export XDG_RUNTIME_DIR=/container/${USER}/runtime-${RID}
-          export TMPDIR=/container/${USER}/tmp-${RID}/
-          mkdir -p "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR" "$TMPDIR"
 
           # Convention: arch goes in the image NAME (…-x86 / …-arm); tag = pure version.
           ARCH_NAME="${IMAGE_NAME}-${PLATFORM}"
@@ -67,17 +63,18 @@ jobs:
           echo "Source:  docker://${SOURCE_REF}  (linux/${ARCH})"
           echo "Setonix: docker://${SETONIX_REF}"
 
-          retry() { local n=1; until "$@"; do [ "$n" -ge 3 ] && return 1; echo "retry $n…"; sleep $((5*n)); n=$((n+1)); done; }
+          # Retry helper: retry <attempts> <delay_seconds> <command...>
+          source .github/scripts/retry.sh
 
-          retry podman login quay.io -u "$QUAY_SC_USER" -p "$QUAY_SC_TOKEN"
-          retry podman login https://setonix-registry.pawsey.org.au -u "$SETONIX_USER" -p "$SETONIX_PASS"
+          retry 3 5 podman login quay.io -u "$QUAY_SC_USER" -p "$QUAY_SC_TOKEN"
+          retry 3 5 podman login https://setonix-registry.pawsey.org.au -u "$SETONIX_USER" -p "$SETONIX_PASS"
 
           echo "Pulling the ${ARCH} variant…"
-          retry podman pull --platform "linux/${ARCH}" "docker://${SOURCE_REF}"
+          retry 3 5 podman pull --platform "linux/${ARCH}" "docker://${SOURCE_REF}"
 
           echo "Pushing to Setonix as ${SETONIX_REF}…"
           podman tag "${SOURCE_REF}" "${SETONIX_REF}"
-          retry podman push "${SETONIX_REF}"
+          retry 3 5 podman push "${SETONIX_REF}"
 
           echo "Saving docker-archive TAR…"
           podman save --format docker-archive "${SOURCE_REF}" -o "${TAR}"
@@ -127,8 +124,6 @@ jobs:
       - name: Cleanup local artifacts
         if: always()
         run: |
-          RID=$(printf '%s' "${RUNNER_NAME:-default}" | sha1sum | cut -c1-12)
-          export XDG_DATA_HOME=/container/${USER}/data-${RID} XDG_RUNTIME_DIR=/container/${USER}/runtime-${RID} TMPDIR=/container/${USER}/tmp-${RID}/
           podman rmi "${SOURCE_REF}" "${{ steps.mirror.outputs.setonix_ref }}" 2>/dev/null || true
           rm -f "${{ steps.mirror.outputs.tar }}" "${{ steps.mirror.outputs.sif }}" 2>/dev/null || true
           {

@@ -38,13 +38,6 @@ on:
         required: true
       ACACIA_SECRET_ACCESS_KEY:
         required: true
-    outputs:
-      image_tag:
-        description: "Built image tag"
-        value: ${{ jobs.build.outputs.image_tag }}
-      image_name:
-        description: "Built image name"
-        value: ${{ jobs.build.outputs.image_name }}
 
 jobs:
   build:
@@ -55,9 +48,6 @@ jobs:
     strategy:
       matrix: ${{ fromJson(inputs.build_matrix) }}
       fail-fast: false
-    outputs:
-      image_tag: ${{ steps.build_container.outputs.image_tag }}
-      image_name: ${{ steps.build_container.outputs.image_name }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v6
@@ -97,7 +87,6 @@ jobs:
           echo "=========================================="
 
           # Export for use in subsequent steps
-          echo "VARIANT_SUFFIX=$VARIANT_SUFFIX" >> $GITHUB_ENV
           echo "VARIANT_NAME=$variant_name" >> $GITHUB_ENV
 
       - name: Apply template values to Dockerfile
@@ -163,27 +152,12 @@ jobs:
           echo "=========================="
 
       - name: Configure podman environment
-        id: setup_env
+        uses: ./.github/actions/podman-env
+
+      - name: Configure build parallelism
         run: |
-          echo "Setting up container environment variables..."
-
-          # Export environment variables
-          # Per-runner isolation so multiple runners (even on one machine) never
-          # share a rootless-podman store. RID = stable fs-safe hash of the runner name.
-          RID=$(printf '%s' "${RUNNER_NAME:-default}" | sha1sum | cut -c1-12)
-          echo "RID=${RID}" >> $GITHUB_ENV
-          export XDG_DATA_HOME=/container/${USER}/data-${RID}
-          export XDG_RUNTIME_DIR=/container/${USER}/runtime-${RID}
-          export TMPDIR=/container/${USER}/tmp-${RID}/
-
-          # Create required directories
-          mkdir -p ${XDG_DATA_HOME}
-          mkdir -p ${XDG_RUNTIME_DIR}
-          mkdir -p ${TMPDIR}
-
           # Set up build optimization variables based on system capabilities
           # JOBS: Number of parallel build stages (optimized for 60+ core system)
-          # IMAGE_CACHE_REF: Cache reference for registry-based caching (using existing cache structure)
 
           # Simple JOBS setting based on CPU cores
           CPU_CORES=$(nproc)
@@ -197,72 +171,10 @@ jobs:
           fi
 
           echo "JOBS setting: $JOBS (based on $CPU_CORES cores)"
-          IMAGE_CACHE_REF="${IMAGE_CACHE_REF:-}"  # Will be configured based on image tag and cache directory
-
-          # Verify directories and output status
-          echo "Environment setup completed:"
-          echo "USER: ${USER}"
-          echo "XDG_DATA_HOME: ${XDG_DATA_HOME}"
-          echo "XDG_RUNTIME_DIR: ${XDG_RUNTIME_DIR}"
-          echo "TMPDIR: ${TMPDIR}"
-          echo "CPU_CORES: $CPU_CORES"
           echo "JOBS: $JOBS (simplified 2-tier setting)"
-          echo "IMAGE_CACHE_REF: ${IMAGE_CACHE_REF:-'auto-configure'}"
 
-          # Check if directories exist
-          for dir in "${XDG_DATA_HOME}" "${XDG_RUNTIME_DIR}" "${TMPDIR}"; do
-            if [ -d "$dir" ]; then
-              echo "✓ Podman Directory exists: $dir"
-            else
-              echo "✗ Podman Directory missing: $dir"
-              exit 1
-            fi
-          done
-
-          # Set environment variables for subsequent steps
-          echo "XDG_DATA_HOME=${XDG_DATA_HOME}" >> $GITHUB_ENV
-          echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> $GITHUB_ENV
-          echo "TMPDIR=${TMPDIR}" >> $GITHUB_ENV
+          # Set environment variable for subsequent steps
           echo "JOBS=${JOBS}" >> $GITHUB_ENV
-          echo "IMAGE_CACHE_REF=${IMAGE_CACHE_REF}" >> $GITHUB_ENV
-
-      - name: Initialize build cache
-        id: setup_cache
-        run: |
-          # Setup podman cache directory
-          CACHE_DIR="/container/${USER}/podman-cache-${RID}"
-          mkdir -p "$CACHE_DIR"
-
-          # Create cache subdirectories for different cache types
-          REGISTRY_CACHE_DIR="$CACHE_DIR/registry"
-          BUILD_CACHE_DIR="$CACHE_DIR/build"
-          mkdir -p "$REGISTRY_CACHE_DIR" "$BUILD_CACHE_DIR"
-
-          echo "[CACHE SETUP]:"
-          echo "  Main cache directory: $CACHE_DIR"
-          echo "  Registry cache directory: $REGISTRY_CACHE_DIR"
-          echo "  Build cache directory: $BUILD_CACHE_DIR"
-
-          # Configure podman to use cache
-          export TMPDIR="${TMPDIR:-/tmp}"
-
-          # Check cache sizes if exist
-          if [ -d "$CACHE_DIR" ]; then
-            cache_size=$(du -sh "$CACHE_DIR" 2>/dev/null | cut -f1 || echo "0")
-            echo "  Current total cache size: $cache_size"
-
-            if [ -d "$REGISTRY_CACHE_DIR" ]; then
-              reg_cache_size=$(du -sh "$REGISTRY_CACHE_DIR" 2>/dev/null | cut -f1 || echo "0")
-              echo "  Registry cache size: $reg_cache_size"
-            fi
-          else
-            echo "  Cache directories created (empty)"
-          fi
-
-          # Set environment variables for cache directories
-          echo "CACHE_DIR=$CACHE_DIR" >> $GITHUB_ENV
-          echo "REGISTRY_CACHE_DIR=$REGISTRY_CACHE_DIR" >> $GITHUB_ENV
-          echo "BUILD_CACHE_DIR=$BUILD_CACHE_DIR" >> $GITHUB_ENV
 
       - name: Build container image
         id: build_container
@@ -281,25 +193,10 @@ jobs:
           echo "Variant suffix: ${VARIANT_SUFFIX}"
           echo "Final image tag: $image_tag"
 
-          # Set up cache tracking (Podman uses native layer caching). Derive the
-          # cache key from branch_path (main/feature) — $main/$feature are not in
-          # this step's env, which previously made the key an empty "-".
-          CACHE_KEY=$(printf '%s' "$branch_path" | tr '/' '-')
-          IMAGE_CACHE_REF="${CACHE_KEY}:cache"
-
-          # Check if we have previous builds for this main/feature combination
-          if [ -d "${REGISTRY_CACHE_DIR}/${CACHE_KEY}" ]; then
-            echo "✓ Found existing build cache directory for ${CACHE_KEY}"
-            echo "✓ Podman will reuse layers from previous builds automatically"
-          else
-            echo "ℹ️ First build for ${CACHE_KEY}, creating cache tracking"
-          fi
-
           echo "Building container with podman (optimized)..."
           echo "Build context: $branch_path"
           echo "Dockerfile: $dockerfile_path"
           echo "Image tag: $image_tag"
-          echo "Cache reference: $IMAGE_CACHE_REF"
 
           # Configure Podman to allow short names without prompting
           # This is needed for non-interactive environments (GitHub Actions)
@@ -314,41 +211,27 @@ jobs:
           # almost all "could not pull base image" (registry blip) — recoverable.
           # A real Dockerfile error fails identically every time, so retrying
           # doesn't paper over compile bugs.
-          n=1
-          delay=15
-          until podman build \
+          source .github/scripts/retry.sh
+          retry 3 15 podman build \
                   --format=docker \
                   --layers \
                   --pull=newer \
                   ${JOBS:+--jobs "$JOBS"} \
                   -f "$dockerfile_path" \
                   -t "$image_tag" \
-                  "$branch_path"; do
-            if [ "$n" -ge 3 ]; then
-              echo "✗ podman build failed after $n attempts"
-              exit 1
-            fi
-            echo "↻ build attempt $n failed; retrying in ${delay}s…"
-            sleep "$delay"
-            n=$((n+1))
-            delay=$((delay*2))
-          done
+                  "$branch_path" \
+            || { echo "✗ podman build failed after retries"; exit 1; }
 
           # Verify the image was built
-          if podman images | grep -q "${image_name}"; then
+          if podman image exists "$image_tag"; then
             echo "✓ Image built successfully: $image_tag"
 
             # Show advanced optimization information
             echo "[LAYER CACHE]: Podman native layer caching enabled"
             echo "[PULL STRATEGY]: newer (only pull if newer than cached)"
             echo "[PARALLEL JOBS]: $JOBS concurrent build stages ($(nproc) cores detected)"
-            echo "[CACHE DIRECTORY]: Using existing cache structure at ${CACHE_DIR}"
             echo "[OPTIMIZATION]: Multi-stage builds and layer reuse enabled"
             echo "[FORMAT]: Docker-compatible image format"
-
-            # Create cache tracking for next builds
-            mkdir -p "${REGISTRY_CACHE_DIR}/${CACHE_KEY}"
-            echo "$(date): Built ${image_tag} with cache ref ${IMAGE_CACHE_REF}" >> "${REGISTRY_CACHE_DIR}/${CACHE_KEY}/build.log"
 
             # Show all images to see layer reuse
             echo "[ALL IMAGES]:"

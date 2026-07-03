@@ -38,7 +38,7 @@
 
 | 输出 | 描述 |
 |-----|------|
-| `rclone_installed` | 是否在此次运行中安装了rclone |
+| `rclone_loaded` | rclone 是否解析成功（PATH / Setonix module / spack / 静态下载，四选一） |
 
 ### 下载模式输出
 
