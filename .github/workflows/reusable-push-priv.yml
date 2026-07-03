@@ -72,32 +72,7 @@ jobs:
         echo "Variant #${{ matrix.index }}"
 
     - name: Configure podman environment
-      run: |
-        echo "Setting up container environment variables for push..."
-
-        # Export environment variables (same as BUILD-job)
-        # Per-runner isolation so multiple runners (even on one machine) never
-        # share a rootless-podman store. RID = stable fs-safe hash of the runner name.
-        RID=$(printf '%s' "${RUNNER_NAME:-default}" | sha1sum | cut -c1-12)
-        echo "RID=${RID}" >> $GITHUB_ENV
-        export XDG_DATA_HOME=/container/${USER}/data-${RID}
-        export XDG_RUNTIME_DIR=/container/${USER}/runtime-${RID}
-        export TMPDIR=/container/${USER}/tmp-${RID}/
-
-        # Create required directories
-        mkdir -p ${XDG_DATA_HOME}
-        mkdir -p ${XDG_RUNTIME_DIR}
-        mkdir -p ${TMPDIR}
-
-        echo "Push environment setup completed:"
-        echo "XDG_DATA_HOME: ${XDG_DATA_HOME}"
-        echo "XDG_RUNTIME_DIR: ${XDG_RUNTIME_DIR}"
-        echo "TMPDIR: ${TMPDIR}"
-
-        # Set environment variables for subsequent steps
-        echo "XDG_DATA_HOME=${XDG_DATA_HOME}" >> $GITHUB_ENV
-        echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> $GITHUB_ENV
-        echo "TMPDIR=${TMPDIR}" >> $GITHUB_ENV
+      uses: ./.github/actions/podman-env
 
     - name: Download archive from S3
       id: locate_archive
@@ -125,21 +100,8 @@ jobs:
         echo " Setonix Registry Push Process"
         echo "=========================================="
 
-        # Retry helper: $1=attempts, $2=delay_seconds, rest=command
-        retry() {
-          local attempts="$1"; local delay="$2"; shift 2
-          local n=1
-          until "$@"; do
-            if [ "$n" -ge "$attempts" ]; then
-              echo "✗ Command failed after $n attempts: $*"
-              return 1
-            fi
-            echo "↻ Attempt $n failed; retrying in ${delay}s…"
-            sleep "$delay"
-            n=$((n+1))
-            delay=$((delay*2))
-          done
-        }
+        # Retry helper: retry <attempts> <delay_seconds> <command...>
+        source .github/scripts/retry.sh
 
         echo "📦 Loading image from archive..."
         archive_file="${{ steps.locate_archive.outputs.archive_name }}"
