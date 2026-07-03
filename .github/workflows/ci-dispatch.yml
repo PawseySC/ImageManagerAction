@@ -103,7 +103,15 @@ jobs:
     # step runs, so without this gate an empty `targets` (devmode / private-only
     # builds) would block on approval even though every inner push step would skip.
     # Mirror the step-level conditions in reusable-push-public.yml exactly.
+    # PUSH_PRIV may be legitimately SKIPPED (no private target in the manifest).
+    # A skipped need cascade-skips dependents via the implicit success(), so we
+    # override with !cancelled() and re-state what we actually require: BUILD
+    # succeeded and PUSH_PRIV did not fail (success or skipped). PUSH_PRIV
+    # failure still blocks the public push (and the approval request).
     if: |
+      !cancelled() &&
+      needs.BUILD.result == 'success' &&
+      (needs.PUSH_PRIV.result == 'success' || needs.PUSH_PRIV.result == 'skipped') &&
       needs.PREPARE.outputs.proceed_valid == 'true' &&
       (
         (contains(needs.PREPARE.outputs.targets, 'quay.io') && needs.PREPARE.outputs.quayio_available == 'true') ||
