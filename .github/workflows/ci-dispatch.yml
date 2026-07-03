@@ -77,11 +77,14 @@ jobs:
   PUSH_PRIV:
     needs: [PREPARE, BUILD]
     # Skip entirely when the manifest names no private target — an empty list is
-    # a valid configuration (public-only build), not an error.
+    # a valid configuration (public-only build), not an error. Also skip when the
+    # Setonix credentials are absent: an honest SKIPPED beats a hollow "success"
+    # job that pushed nothing (mirrors PUSH_PUBLIC's target+creds gating).
     if: |
       needs.PREPARE.outputs.proceed_valid == 'true' &&
       needs.PREPARE.outputs.private_targets != '[]' &&
-      needs.PREPARE.outputs.private_targets != ''
+      needs.PREPARE.outputs.private_targets != '' &&
+      needs.PREPARE.outputs.setonixreg_available == 'true'
     uses: ./.github/workflows/reusable-push-priv.yml
     with:
       runner_label: ${{ needs.PREPARE.outputs.runner_label }}
@@ -158,8 +161,9 @@ jobs:
     # Promote the cicd branch to main automatically once the run has ACTUALLY
     # succeeded — removes the manual merge step. For public-target runs this only
     # fires AFTER the manual_approval gate (it needs PUSH_PUBLIC, which waits for
-    # approval); for private-only / devmode runs PUSH_PUBLIC is skipped and it
-    # merges as soon as build + private push succeed. Uses the server-side merges
+    # approval; devmode routes that gate to the unprotected `development` env).
+    # For runs with no public target PUSH_PUBLIC is skipped and this merges as
+    # soon as build + private push succeed. Uses the server-side merges
     # API (atomic, no checkout/push race). main is the default, unprotected branch.
     # Also needs SUMMARY so the branch is deleted only AFTER SUMMARY's checkout — a
     # parallel job fetching a commit on a just-deleted branch can fail. SUMMARY's

@@ -50,6 +50,15 @@ combinations=$(jq -c '
 varying_keys_json=$(jq -c '[to_entries[] | select((.value | type == "array") and (.value | length > 1)) | .key] | sort' <<< "$template")
 variant_count=$(jq 'length' <<< "$combinations")
 
+# A template key with an empty array ("K": []) annihilates the cartesian product.
+# Fail here with a readable message instead of emitting include:[] and letting
+# BUILD die on an opaque empty-matrix scheduling error. (stderr only — stdout is
+# reserved for the three key=value output lines.)
+if [ "$variant_count" -eq 0 ]; then
+  echo "ERROR: template produced 0 variants — a template key has an empty array value" >&2
+  exit 1
+fi
+
 matrix_json=$(jq -c \
   --argjson vk "$varying_keys_json" \
   --arg base "$base_sanitized" \

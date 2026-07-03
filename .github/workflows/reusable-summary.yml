@@ -164,7 +164,7 @@ jobs:
 
             # Setonix Private Registry (attempted whenever credentials are available)
             if [ "${{ inputs.result_push_priv }}" = "skipped" ]; then
-              echo "### Setonix Private Registry — ⏭️ skipped (no private target selected)" >> /tmp/registry_block.txt
+              echo "### Setonix Private Registry — ⏭️ skipped (no private target selected or credentials unavailable)" >> /tmp/registry_block.txt
               echo "" >> /tmp/registry_block.txt
             elif [ "${{ inputs.setonixreg_available }}" = "true" ]; then
               if [ "${{ inputs.result_push_priv }}" = "success" ]; then
@@ -233,7 +233,7 @@ jobs:
             private_targets='${{ inputs.private_targets }}'
             private_username=$(echo "$private_targets" | jq -r '.[0] // "unknown"')
             if [ "${{ inputs.result_push_priv }}" = "skipped" ]; then
-              echo "| Setonix Private | — | ⏭️ Skipped (no private target) |" >> /tmp/registry_block.txt
+              echo "| Setonix Private | — | ⏭️ Skipped (no private target or credentials unavailable) |" >> /tmp/registry_block.txt
             elif [ "${{ inputs.setonixreg_available }}" = "true" ] && [ "${{ inputs.result_push_priv }}" = "success" ]; then
               echo "| Setonix Private | \`setonix-registry.pawsey.org.au/${private_username}/${IMAGE_NAME}:${VERSION}\` | ✅ Pushed |" >> /tmp/registry_block.txt
             elif [ "${{ inputs.setonixreg_available }}" = "true" ]; then

@@ -142,8 +142,13 @@ jobs:
           # as a pull ref.
           digest=$(awk 'tolower($1)=="docker-content-digest:" {print $2}' "$headers_file" | tr -d '\r')
           if [ -z "$digest" ]; then
-            digest="sha256:$(printf '%s' "$manifest_response" | sha256sum | cut -d' ' -f1)"
-            echo "Docker-Content-Digest header missing; computed from body: $digest"
+            # Hard failure by design: hashing the body ourselves risks a subtly
+            # wrong digest (command substitution strips trailing newlines), and a
+            # wrong pin is exactly the broken-SHPC-entry class this step exists
+            # to prevent. quay.io always sends the header in practice.
+            echo "::error::Docker-Content-Digest header missing from manifest response — refusing to guess the digest"
+            rm -f "$headers_file"
+            exit 1
           fi
           rm -f "$headers_file"
 
