@@ -18,7 +18,6 @@ concurrency:
 
 permissions:
   contents: read
-  security-events: write  # Required for uploading SARIF results to GitHub Security tab
   actions: read           # Required for accessing workflow run information
 
 jobs:
@@ -165,6 +164,8 @@ jobs:
     # Also needs SUMMARY so the branch is deleted only AFTER SUMMARY's checkout — a
     # parallel job fetching a commit on a just-deleted branch can fail. SUMMARY's
     # result is not gated on (it's always() / cosmetic); we just wait for it.
+    # SCAN and TEST are advisory by design (report-only) — their results are shown
+    # in SUMMARY but never gate the merge.
     needs: [PREPARE, BUILD, PUSH_PRIV, PUSH_PUBLIC, DEPLOY, SUMMARY]
     if: |
       !cancelled() &&
