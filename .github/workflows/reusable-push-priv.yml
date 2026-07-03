@@ -149,7 +149,8 @@ jobs:
         # rendered shell literal here — bash sees a single env-var read.
         private_username=$(printf '%s' "$PRIVATE_TARGETS_JSON" | jq -r '.[0] // empty')
         if [ -z "$private_username" ] || [ "$private_username" = "null" ]; then
-          echo "Error: No private targets found in manifest"; exit 1
+          echo "No private targets in manifest — nothing to push (this job is normally skipped upstream)."
+          exit 0
         fi
 
         image_tag="${IMAGE_NAME}:${VERSION}"

@@ -77,7 +77,12 @@ jobs:
 
   PUSH_PRIV:
     needs: [PREPARE, BUILD]
-    if: needs.PREPARE.outputs.proceed_valid == 'true'
+    # Skip entirely when the manifest names no private target — an empty list is
+    # a valid configuration (public-only build), not an error.
+    if: |
+      needs.PREPARE.outputs.proceed_valid == 'true' &&
+      needs.PREPARE.outputs.private_targets != '[]' &&
+      needs.PREPARE.outputs.private_targets != ''
     uses: ./.github/workflows/reusable-push-priv.yml
     with:
       runner_label: ${{ needs.PREPARE.outputs.runner_label }}
@@ -157,7 +162,7 @@ jobs:
       !cancelled() &&
       needs.PREPARE.outputs.proceed_valid == 'true' &&
       needs.BUILD.result == 'success' &&
-      needs.PUSH_PRIV.result == 'success' &&
+      (needs.PUSH_PRIV.result == 'success' || needs.PUSH_PRIV.result == 'skipped') &&
       (needs.PUSH_PUBLIC.result == 'success' || needs.PUSH_PUBLIC.result == 'skipped') &&
       (needs.DEPLOY.result == 'success' || needs.DEPLOY.result == 'skipped')
     runs-on: ubuntu-latest
