@@ -87,126 +87,77 @@ runs:
       id: load_rclone
       shell: bash
       run: |
-        set +e  # Don't exit on errors, we'll try multiple methods
-        echo "Loading rclone module (trying multiple methods)..."
+        set +e  # try each method in turn; we handle total failure explicitly below
+        echo "Resolving rclone (trying multiple methods)..."
 
-        # Method 1: Check if rclone is already available
-        if command -v rclone >/dev/null 2>&1; then
-          echo "✓ rclone already available in PATH"
+        # Resolve rclone by whatever method works on this runner. The FIRST
+        # success wins; its directory is persisted to $GITHUB_PATH below so that
+        # EVERY later step in this composite action finds rclone on PATH.
+        # (module-/spack-provided PATH does not survive across composite steps,
+        # which is exactly why we persist the resolved directory here once.)
+        find_rclone() {
+          # Method 1: already available in PATH
+          command -v rclone >/dev/null 2>&1 && return 0
+          # Method 2: Setonix module system (module load rclone/1.68.1)
+          echo "Trying Setonix module load..."
+          module load rclone/1.68.1 2>/dev/null && command -v rclone >/dev/null 2>&1 && return 0
+          # Method 3: spack (e.g. Ella) — module load spack + spack load rclone
+          echo "Trying spack (module load spack + spack load rclone)..."
+          module load spack 2>/dev/null && spack load rclone 2>/dev/null && command -v rclone >/dev/null 2>&1 && return 0
+          # Method 4: static rclone binary for this architecture. Works on ANY
+          # self-hosted runner with outbound internet — no Setonix module / Ella
+          # spack required, so ARM64 work isn't tied to one host.
+          echo "Trying static rclone download..."
+          local rarch
+          case "$(uname -m)" in
+            aarch64|arm64) rarch=arm64 ;;
+            x86_64|amd64)  rarch=amd64 ;;
+            *) return 1 ;;
+          esac
+          local rbin="${RUNNER_TEMP:-/tmp}/rclone-bin"
+          mkdir -p "$rbin"
+          curl -fsSL "https://downloads.rclone.org/rclone-current-linux-${rarch}.zip" -o "$rbin/rclone.zip" \
+            && unzip -o -j "$rbin/rclone.zip" '*/rclone' -d "$rbin" >/dev/null \
+            && chmod +x "$rbin/rclone" || return 1
+          export PATH="$rbin:$PATH"
+          command -v rclone >/dev/null 2>&1
+        }
+
+        if find_rclone; then
+          RCLONE_BIN=$(command -v rclone)
+          dirname "$RCLONE_BIN" >> "$GITHUB_PATH"
+          echo "✓ rclone at $RCLONE_BIN (dir persisted to GITHUB_PATH)"
           rclone version
-          echo "loaded=true" >> $GITHUB_OUTPUT
-          exit 0
+          echo "loaded=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error::rclone unavailable (PATH, Setonix module, spack, static download all failed)"
+          exit 1
         fi
-
-        # Method 2: Try Setonix module system (module load rclone/1.68.1)
-        echo "Trying Setonix module load..."
-        if module load rclone/1.68.1 2>/dev/null; then
-          if command -v rclone >/dev/null 2>&1; then
-            echo "✓ rclone loaded via Setonix module system"
-            rclone version
-            echo "loaded=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-        fi
-
-        # Method 3: spack (e.g. Ella) — module load spack + spack load rclone
-        echo "Trying spack (module load spack + spack load rclone)..."
-        if module load spack 2>/dev/null; then
-          if spack load rclone 2>/dev/null; then
-            if command -v rclone >/dev/null 2>&1; then
-              echo "✓ rclone loaded via spack"
-              rclone version
-              echo "loaded=true" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-          fi
-        fi
-
-        # Method 4: static rclone binary for this architecture. Works on ANY
-        # self-hosted runner with outbound internet — no Setonix module / Ella
-        # spack required, so ARM64 work isn't tied to one host. Persisted via
-        # $GITHUB_PATH so later steps find it in PATH.
-        echo "Trying static rclone download..."
-        case "$(uname -m)" in
-          aarch64|arm64) RARCH=arm64 ;;
-          x86_64|amd64)  RARCH=amd64 ;;
-          *)             RARCH="" ;;
-        esac
-        if [ -n "$RARCH" ]; then
-          RBIN="${RUNNER_TEMP:-/tmp}/rclone-bin"
-          mkdir -p "$RBIN"
-          if curl -fsSL "https://downloads.rclone.org/rclone-current-linux-${RARCH}.zip" -o "$RBIN/rclone.zip" 2>/dev/null \
-             && unzip -o -j "$RBIN/rclone.zip" '*/rclone' -d "$RBIN" >/dev/null 2>&1 \
-             && chmod +x "$RBIN/rclone"; then
-            echo "$RBIN" >> "$GITHUB_PATH"
-            export PATH="$RBIN:$PATH"
-            if command -v rclone >/dev/null 2>&1; then
-              echo "✓ rclone installed via static download ($RARCH)"
-              rclone version
-              echo "loaded=true" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-          fi
-        fi
-
-        # All methods failed
-        echo "✗ Failed to load rclone using any available method"
-        echo "Tried:"
-        echo "  1. Direct PATH lookup"
-        echo "  2. module load rclone/1.68.1 (Setonix)"
-        echo "  3. module load spack && spack load rclone"
-        echo "  4. static download from downloads.rclone.org"
-        exit 1
 
     - name: Configure rclone (local config)
       shell: bash
+      env:
+        S3_ENDPOINT: ${{ inputs.endpoint }}
+        S3_ACCESS_KEY_ID: ${{ inputs.access_key_id }}
+        S3_SECRET_ACCESS_KEY: ${{ inputs.secret_access_key }}
       run: |
         set -euo pipefail
-
-        # Helper function to ensure rclone is loaded
-        ensure_rclone() {
-          if command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          # Setonix module
-          if module load rclone/1.68.1 2>/dev/null && command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          # spack (e.g. Ella)
-          if module load spack 2>/dev/null && spack load rclone 2>/dev/null && command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          # static download fallback (any runner with outbound internet)
-          local rarch=""
-          case "$(uname -m)" in aarch64|arm64) rarch=arm64 ;; x86_64|amd64) rarch=amd64 ;; esac
-          if [ -n "$rarch" ]; then
-            local rbin="${RUNNER_TEMP:-/tmp}/rclone-bin"
-            mkdir -p "$rbin"
-            if [ ! -x "$rbin/rclone" ]; then
-              curl -fsSL "https://downloads.rclone.org/rclone-current-linux-${rarch}.zip" -o "$rbin/rclone.zip" 2>/dev/null \
-                && unzip -o -j "$rbin/rclone.zip" '*/rclone' -d "$rbin" >/dev/null 2>&1 && chmod +x "$rbin/rclone" || true
-            fi
-            export PATH="$rbin:$PATH"
-            command -v rclone >/dev/null 2>&1 && return 0
-          fi
-          echo "✗ rclone not available"
-          return 1
-        }
-
-        ensure_rclone
+        command -v rclone >/dev/null || { echo "::error::rclone missing from PATH"; exit 1; }
 
         # Use unique config directory per job to avoid conflicts in matrix builds
         # Include PID and random suffix for uniqueness
         CONFIG_DIR="./.rclone_config_$$_${RANDOM}"
         mkdir -p "$CONFIG_DIR"
 
+        # Secrets come from the step-level env: block (not interpolated into the
+        # script text). Heredoc is unquoted so these variables expand.
         tee "$CONFIG_DIR/rclone.conf" > /dev/null <<EOF
         [pawsey0012]
         type = s3
         provider = Ceph
-        endpoint = ${{ inputs.endpoint }}
-        access_key_id = ${{ inputs.access_key_id }}
-        secret_access_key = ${{ inputs.secret_access_key }}
+        endpoint = ${S3_ENDPOINT}
+        access_key_id = ${S3_ACCESS_KEY_ID}
+        secret_access_key = ${S3_SECRET_ACCESS_KEY}
         EOF
 
         # Export environment variable so rclone automatically picks up this config
@@ -219,23 +170,8 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        command -v rclone >/dev/null || { echo "::error::rclone missing from PATH"; exit 1; }
 
-        # Helper function to ensure rclone is loaded
-        ensure_rclone() {
-          if command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          if module load rclone/1.68.1 2>/dev/null && command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          if module load spack 2>/dev/null && spack load rclone 2>/dev/null && command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          echo "✗ rclone not available"
-          return 1
-        }
-
-        ensure_rclone
         echo "Verifying rclone configuration..."
         rclone config show
 
@@ -244,23 +180,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-
-        # Helper function to ensure rclone is loaded
-        ensure_rclone() {
-          if command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          if module load rclone/1.68.1 2>/dev/null && command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          if module load spack 2>/dev/null && spack load rclone 2>/dev/null && command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          echo "✗ rclone not available"
-          return 1
-        }
-
-        ensure_rclone
+        command -v rclone >/dev/null || { echo "::error::rclone missing from PATH"; exit 1; }
 
         bucket="${{ inputs.bucket }}"
         endpoint="${{ inputs.endpoint }}"
@@ -374,23 +294,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-
-        # Helper function to ensure rclone is loaded
-        ensure_rclone() {
-          if command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          if module load rclone/1.68.1 2>/dev/null && command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          if module load spack 2>/dev/null && spack load rclone 2>/dev/null && command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          echo "✗ rclone not available"
-          return 1
-        }
-
-        ensure_rclone
+        command -v rclone >/dev/null || { echo "::error::rclone missing from PATH"; exit 1; }
 
         # Validate required inputs for download mode
         if [ -z "${{ inputs.dockerfile_name }}" ] || [ -z "${{ inputs.version }}" ]; then
@@ -478,23 +382,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-
-        # Helper function to ensure rclone is loaded
-        ensure_rclone() {
-          if command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          if module load rclone/1.68.1 2>/dev/null && command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          if module load spack 2>/dev/null && spack load rclone 2>/dev/null && command -v rclone >/dev/null 2>&1; then
-            return 0
-          fi
-          echo "✗ rclone not available"
-          return 1
-        }
-
-        ensure_rclone
+        command -v rclone >/dev/null || { echo "::error::rclone missing from PATH"; exit 1; }
 
         # Validate required inputs for upload mode
         if [ -z "${{ inputs.upload_file }}" ]; then
