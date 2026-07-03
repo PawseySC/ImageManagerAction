@@ -7,7 +7,7 @@
   "platform": "x86",
   "shpc": false,
   "targets": [
-    "dockerhub"
+    "quay.io"
   ],
   "private-targets": [
     "liu268"
@@ -18,8 +18,8 @@
     "path": "python/cuda/"
   },
   "metadata": {
-    "timestamp": "2026-07-03T13:52:41.867604Z",
-    "correlation_id": "5f0af5d1-a837-422c-97c7-369cbca1b187"
+    "timestamp": "2026-07-03T18:13:11.649224Z",
+    "correlation_id": "86a5811b-92b3-40c9-afec-85a5eefecdd0"
   },
   "labels": {
     "org.opencontainers.image.authors": "Test User",
