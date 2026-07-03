@@ -211,8 +211,7 @@ jobs:
       - name: Determine branch directory path
         id: parse_branch
         run: |
-          # Extract main and feature from branch name
-          # Supports formats: cicd-main/feature or cicd-main-feature
+          # Extract main and feature from branch name (cicd-<main>/<feature>).
           branch_name="${{ github.ref_name }}"
           echo "Branch name: $branch_name"
 
@@ -225,16 +224,15 @@ jobs:
           path_part="${branch_name#cicd-}"
           echo "Path part after removing 'cicd-': $path_part"
 
-          # Check if path_part contains a forward slash (preferred format: cicd-main/feature)
+          # The branch must carry a main/feature slash: the manifest cross-check
+          # below compares branch_path against "${main}/${feature}", so a slashless
+          # name can never validate.
           if [[ "$path_part" == *"/"* ]]; then
-            # Format: cicd-main/feature -> main/feature
             branch_path="$path_part"
             echo "✓ Using slash-separated format: $branch_path"
           else
-            # Fallback: try to parse cicd-main-feature format
-            # This is less reliable but maintained for backwards compatibility
-            echo "⚠️  Using legacy dash-separated format, consider using cicd-main/feature instead"
-            branch_path="$path_part"
+            echo "::error title=Bad branch name::Branch must be named cicd-<main>/<feature> (got '${branch_name}'). The dash format cicd-main-feature is not supported: the manifest cross-check requires main/feature."
+            exit 1
           fi
 
           echo "Final branch path: $branch_path"
@@ -243,6 +241,11 @@ jobs:
       - name: Validate manifest and extract configuration
         id: validate_manifest
         run: |
+          fail() {
+            echo "::error title=Manifest validation failed::$1"
+            exit 1
+          }
+
           branch_path="${{ steps.parse_branch.outputs.branch_path }}"
           manifest_file="${branch_path}/manifest.json"
 
@@ -251,10 +254,7 @@ jobs:
 
           # Check if manifest.json exists
           if [ ! -f "$manifest_file" ]; then
-            echo "Error: manifest.json not found at $manifest_file"
-            echo "This workflow requires a manifest.json file in the branch directory."
-            echo "proceed_valid=false" >> $GITHUB_OUTPUT
-            exit 0
+            fail "manifest.json not found at $manifest_file. This workflow requires a manifest.json file in the branch directory."
           fi
 
           # Find the Dockerfile. Space/paren-safe: the multi-file uploader keeps
@@ -275,11 +275,7 @@ jobs:
 
           # Check if any Dockerfile variant was found
           if [ -z "$dockerfile_found" ]; then
-            echo "Error: No Dockerfile found in $branch_path"
-            echo "Searched for: Dockerfile, dockerfile, *.dockerfile, *.Dockerfile"
-            echo "This workflow requires a Dockerfile in the branch directory."
-            echo "proceed_valid=false" >> $GITHUB_OUTPUT
-            exit 0
+            fail "No Dockerfile found in $branch_path (searched for: Dockerfile, dockerfile, *.dockerfile, *.Dockerfile). This workflow requires a Dockerfile in the branch directory."
           fi
           echo "✓ Found Dockerfile: $dockerfile_found"
 
@@ -319,35 +315,25 @@ jobs:
 
           # Validate required fields
           if [ -z "$main" ] || [ "$main" = "null" ]; then
-            echo "Error: Missing 'main' field in manifest.json"
-            echo "proceed_valid=false" >> $GITHUB_OUTPUT
-            exit 0
+            fail "Missing 'main' field in manifest.json"
           fi
 
           if [ -z "$feature" ] || [ "$feature" = "null" ]; then
-            echo "Error: Missing 'feature' field in manifest.json"
-            echo "proceed_valid=false" >> $GITHUB_OUTPUT
-            exit 0
+            fail "Missing 'feature' field in manifest.json"
           fi
 
           if [ -z "$version" ] || [ "$version" = "null" ]; then
-            echo "Error: Missing 'version' field in manifest.json"
-            echo "proceed_valid=false" >> $GITHUB_OUTPUT
-            exit 0
+            fail "Missing 'version' field in manifest.json"
           fi
 
           # Validate version format (semver X.Y.Z)
           if ! echo "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Error: Invalid version format '$version'. Expected X.Y.Z"
-            echo "proceed_valid=false" >> $GITHUB_OUTPUT
-            exit 0
+            fail "Invalid version format '$version'. Expected X.Y.Z"
           fi
 
           # Validate platform
           if [ "$platform" != "x86" ] && [ "$platform" != "arm" ]; then
-            echo "Error: Invalid platform '$platform'. Expected 'x86' or 'arm'"
-            echo "proceed_valid=false" >> $GITHUB_OUTPUT
-            exit 0
+            fail "Invalid platform '$platform'. Expected 'x86' or 'arm'"
           fi
 
           # Validate targets array
@@ -358,9 +344,7 @@ jobs:
           # Validate branch path matches manifest
           expected_path="${main}/${feature}"
           if [ "$branch_path" != "$expected_path" ]; then
-            echo "Error: Branch path '$branch_path' doesn't match manifest main/feature '$expected_path'"
-            echo "proceed_valid=false" >> $GITHUB_OUTPUT
-            exit 0
+            fail "Branch path '$branch_path' doesn't match manifest main/feature '$expected_path'"
           fi
 
           echo "✓ Manifest validation passed"

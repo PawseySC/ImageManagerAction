@@ -2,7 +2,7 @@ name: Image Manager CI/CD Dispatcher
 # Version 2.1.0 - Modularized with reusable workflows
 # This workflow dispatches to reusable workflow files for easier debugging
 # Triggered by pushes to cicd-* branches with manifest.json configuration
-# Supports branch formats: cicd-main/feature (preferred) or cicd-main-feature (legacy)
+# Branch format: cicd-<main>/<feature> (the dash form cicd-main-feature is NOT supported)
 
 on:
   push:
