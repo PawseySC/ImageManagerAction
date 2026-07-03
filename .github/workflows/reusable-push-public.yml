@@ -71,6 +71,14 @@ jobs:
       VERSION: ${{ inputs.version }}
       TARGETS: ${{ inputs.targets }}
     steps:
+    # Local composite actions (./.github/actions/…) resolve against the job's
+    # OWN checkout — never rely on a previous job's leftover workspace, which on
+    # self-hosted runners can hold a DIFFERENT branch's version of the action.
+    - name: Checkout (required to resolve local composite actions)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+
     - name: Set image name for this variant
       id: set_image_name
       run: |
