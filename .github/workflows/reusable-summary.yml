@@ -108,7 +108,12 @@ jobs:
       - name: Generate archive block
         id: archive_block
         run: |
-          IMAGE_NAME="${MAIN}-${FEATURE}"
+          # Authoritative name from the build matrix — single-variant runs carry
+          # image_name there too (process-template applies a static
+          # org.opencontainers.image.name suffix even without a template), so
+          # MAIN-FEATURE is only the last-resort fallback.
+          IMAGE_NAME=$(echo '${{ inputs.build_matrix }}' | jq -r '.include[0].image_name // empty' 2>/dev/null)
+          [ -z "$IMAGE_NAME" ] && IMAGE_NAME="${MAIN}-${FEATURE}"
 
           if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
             # Only claim archives were uploaded if BUILD actually succeeded.
@@ -152,7 +157,12 @@ jobs:
       - name: Generate registry block
         id: registry_block
         run: |
-          IMAGE_NAME="${MAIN}-${FEATURE}"
+          # Authoritative name from the build matrix — single-variant runs carry
+          # image_name there too (process-template applies a static
+          # org.opencontainers.image.name suffix even without a template), so
+          # MAIN-FEATURE is only the last-resort fallback.
+          IMAGE_NAME=$(echo '${{ inputs.build_matrix }}' | jq -r '.include[0].image_name // empty' 2>/dev/null)
+          [ -z "$IMAGE_NAME" ] && IMAGE_NAME="${MAIN}-${FEATURE}"
 
           if [ "${{ env.HAS_TEMPLATE }}" = "true" ]; then
             targets='${{ inputs.targets }}'
@@ -285,7 +295,12 @@ jobs:
       - name: Generate SHPC block
         id: shpc_block
         run: |
-          IMAGE_NAME="${MAIN}-${FEATURE}"
+          # Authoritative name from the build matrix — single-variant runs carry
+          # image_name there too (process-template applies a static
+          # org.opencontainers.image.name suffix even without a template), so
+          # MAIN-FEATURE is only the last-resort fallback.
+          IMAGE_NAME=$(echo '${{ inputs.build_matrix }}' | jq -r '.include[0].image_name // empty' 2>/dev/null)
+          [ -z "$IMAGE_NAME" ] && IMAGE_NAME="${MAIN}-${FEATURE}"
 
           # SHPC deployment status
           if [ "${{ inputs.result_deploy }}" = "success" ]; then
@@ -423,7 +438,12 @@ jobs:
 
       - name: Render summary from template
         run: |
-          IMAGE_NAME="${MAIN}-${FEATURE}"
+          # Authoritative name from the build matrix — single-variant runs carry
+          # image_name there too (process-template applies a static
+          # org.opencontainers.image.name suffix even without a template), so
+          # MAIN-FEATURE is only the last-resort fallback.
+          IMAGE_NAME=$(echo '${{ inputs.build_matrix }}' | jq -r '.include[0].image_name // empty' 2>/dev/null)
+          [ -z "$IMAGE_NAME" ] && IMAGE_NAME="${MAIN}-${FEATURE}"
           TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S UTC')
           BRANCH="${{ github.ref_name }}"
 
@@ -514,7 +534,12 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -uo pipefail
-          IMAGE_NAME="${MAIN}-${FEATURE}"
+          # Authoritative name from the build matrix — single-variant runs carry
+          # image_name there too (process-template applies a static
+          # org.opencontainers.image.name suffix even without a template), so
+          # MAIN-FEATURE is only the last-resort fallback.
+          IMAGE_NAME=$(echo '${{ inputs.build_matrix }}' | jq -r '.include[0].image_name // empty' 2>/dev/null)
+          [ -z "$IMAGE_NAME" ] && IMAGE_NAME="${MAIN}-${FEATURE}"
           TS=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
           # Sanitize JSON-typed inputs (fall back to safe defaults if malformed).
@@ -523,11 +548,10 @@ jobs:
           echo "$BUILD_MATRIX"    | jq . >/dev/null 2>&1 || BUILD_MATRIX='{"include":[]}'
           PRIVATE_USER=$(echo "$PRIVATE_TARGETS" | jq -r '.[0] // "unknown"')
 
-          # The list of image names: from the matrix for multi-variant, else MAIN-FEATURE.
-          if [ "$HAS_TEMPLATE" = "true" ]; then
-            # // empty drops missing/null image_name entries so the fallback below fires
-            IMAGE_NAMES=$(echo "$BUILD_MATRIX" | jq -r '.include[].image_name // empty' 2>/dev/null)
-          fi
+          # The list of image names: ALWAYS from the matrix (it is authoritative
+          # for single-variant runs too); MAIN-FEATURE only as last resort.
+          # // empty drops missing/null image_name entries so the fallback below fires
+          IMAGE_NAMES=$(echo "$BUILD_MATRIX" | jq -r '.include[].image_name // empty' 2>/dev/null)
           if [ -z "${IMAGE_NAMES:-}" ]; then IMAGE_NAMES="$IMAGE_NAME"; fi
 
           # Per-registry result (mirrors the markdown registry block logic).
